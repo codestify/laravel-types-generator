@@ -29,7 +29,17 @@ class AstAnalyzer
 
     public function __construct()
     {
-        $this->parser = (new ParserFactory)->createForNewestSupportedVersion();
+        // Handle both php-parser v4 and v5 compatibility
+        $factory = new ParserFactory;
+        
+        if (method_exists($factory, 'createForNewestSupportedVersion')) {
+            // php-parser v5+
+            $this->parser = $factory->createForNewestSupportedVersion();
+        } else {
+            // php-parser v4 fallback
+            $this->parser = $factory->create(ParserFactory::PREFER_PHP7);
+        }
+        
         $this->nodeFinder = new NodeFinder;
         $this->typeAnalyzer = new EnhancedTypeAnalyzer(new MigrationAnalyzer);
         $this->complexAnalyzer = new ComplexExpressionAnalyzer($this->typeAnalyzer);
