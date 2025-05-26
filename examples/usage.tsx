@@ -1,6 +1,13 @@
 // Example usage of generated types in React/TypeScript
 //@ts-nocheck
-import type { User, Event, Product } from '@/types/generated';
+
+// Import generated types - adjust path based on your configuration
+// Default: '@/types/generated' or relative path to your output directory
+import type { Event, Product, User } from '@/types/generated';
+
+// Alternative import examples depending on your project structure:
+// import type { Event, Product, User } from '../types/generated';
+// import type { Event, Product, User } from '../../resources/js/types/generated';
 
 // Example 1: Using the User type in a component
 interface UserCardProps {
@@ -13,7 +20,7 @@ const UserCard: React.FC<UserCardProps> = ({ user }) => {
             <h2>{user.name}</h2>
             <p>{user.email}</p>
             {user.bio && <p className="bio">{user.bio}</p>}
-            
+
             {user.is_verified && <span className="badge verified">Verified</span>}
             {user.is_premium && <span className="badge premium">Premium</span>}
         </div>
@@ -47,6 +54,7 @@ const fetchUsers = async (): Promise<User[]> => {
     // Full type safety on the returned data
     return data as User[];
 };
+
 // Example 4: Using types with form data
 interface CreateEventForm {
     title: string;
@@ -61,7 +69,7 @@ const createEvent = async (formData: CreateEventForm): Promise<Event> => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
     });
-    
+
     return response.json() as Promise<Event>;
 };
 
@@ -83,4 +91,4 @@ const ProductDisplay: React.FC<{ product: ProductWithReviews }> = ({ product }) 
     );
 };
 
-export { UserCard, EventCard, fetchUsers, createEvent, ProductDisplay };
+export { createEvent, EventCard, fetchUsers, ProductDisplay, UserCard };

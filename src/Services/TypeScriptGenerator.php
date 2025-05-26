@@ -4,6 +4,7 @@ namespace Codemystify\TypesGenerator\Services;
 
 use Codemystify\TypesGenerator\Contracts\TypeScriptGeneratorInterface;
 use Codemystify\TypesGenerator\Exceptions\GenerationException;
+use Codemystify\TypesGenerator\Utils\PathResolver;
 use Illuminate\Support\Facades\File;
 
 class TypeScriptGenerator implements TypeScriptGeneratorInterface
@@ -92,7 +93,8 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
     private function generateGroupFile(string $group, array $types): array
     {
         $filename = str_replace('{group}', $group, $this->config['output']['filename_pattern']);
-        $filepath = $this->config['output']['path'].'/'.$filename;
+        $outputPath = PathResolver::resolve($this->config['output']['path']);
+        $filepath = $outputPath.'/'.$filename;
 
         $content = $this->generateTypeScriptContent($types);
 
@@ -127,10 +129,10 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
         $timestamp = now()->toISOString();
 
         return "/**\n".
-               " * Auto-generated TypeScript types\n".
-               " * Generated at: {$timestamp}\n".
-               " * DO NOT EDIT MANUALLY - This file is auto-generated\n".
-               " */\n\n";
+            " * Auto-generated TypeScript types\n".
+            " * Generated at: {$timestamp}\n".
+            " * DO NOT EDIT MANUALLY - This file is auto-generated\n".
+            " */\n\n";
     }
 
     private function generateTypeComment($config, string $source): string
@@ -271,8 +273,8 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
     private function isOptional(array $value): bool
     {
         return ($value['nullable'] ?? false) ||
-               isset($value['default']) ||
-               ! $this->config['generation']['strict_types'];
+            isset($value['default']) ||
+            ! $this->config['generation']['strict_types'];
     }
 
     private function groupTypesByGroup(array $types): array
@@ -289,7 +291,8 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
     private function generateIndexFile(array $groupedTypes): void
     {
-        $indexPath = $this->config['output']['path'].'/index.ts';
+        $outputPath = PathResolver::resolve($this->config['output']['path']);
+        $indexPath = $outputPath.'/index.ts';
 
         $content = $this->generateHeader();
         $content .= "// Re-export all generated types\n\n";
@@ -309,7 +312,7 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
     private function ensureOutputDirectory(): void
     {
-        $path = $this->config['output']['path'];
+        $path = PathResolver::resolve($this->config['output']['path']);
 
         if (! File::exists($path)) {
             File::makeDirectory($path, 0755, true);
@@ -338,7 +341,7 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
     private function extractNestedTypesFromStructure(array &$structure, string $parentName, array &$types): void
     {
         foreach ($structure as $key => &$field) {
-            if ($field['type'] === 'object' && isset($field['structure']) && is_array($field['structure'])) {
+            if (is_array($field) && isset($field['type']) && $field['type'] === 'object' && isset($field['structure']) && is_array($field['structure'])) {
                 // Create a new interface for this nested object
                 $nestedTypeName = $this->generateNestedTypeName($parentName, $key);
 

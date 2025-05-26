@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class GenerateTypesCommand extends Command
 {
-    protected $signature = 'generate:types 
+    protected $signature = 'generate:types
                            {--force : Force regeneration of all types}
                            {--group= : Generate specific group only}
                            {--watch : Watch for changes and regenerate}';

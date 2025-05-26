@@ -68,7 +68,7 @@
     "scripts": {
         "test": "pest",
         "test:unit": "pest tests/Unit",
-        "test:feature": "pest tests/Feature", 
+        "test:feature": "pest tests/Feature",
         "test:coverage": "pest --coverage",
         "test:coverage-html": "pest --coverage --coverage-html=coverage",
         "format": "pint",

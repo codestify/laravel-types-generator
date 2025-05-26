@@ -14,9 +14,13 @@ composer require codemystify/types-generator
 echo "📝 Publishing configuration..."
 php artisan vendor:publish --tag=types-generator-config
 
-# Create output directory
+# Create output directory based on config (default: resources/js/types/generated)
 echo "📁 Creating output directory..."
-mkdir -p resources/js/types/generated
+OUTPUT_PATH=$(php artisan tinker --execute="echo config('types-generator.output.path');" 2>/dev/null | tail -1)
+if [ -z "$OUTPUT_PATH" ] || [ "$OUTPUT_PATH" = "" ]; then
+    OUTPUT_PATH="resources/js/types/generated"
+fi
+mkdir -p "$OUTPUT_PATH"
 
 # Generate initial types
 echo "⚙️ Generating initial types..."
@@ -32,4 +36,5 @@ echo ""
 echo "🎯 Next steps:"
 echo "1. Add #[GenerateTypes] attributes to your Resources/Controllers"
 echo "2. Run 'php artisan generate:types' to generate TypeScript types"
-echo "3. Import types in your frontend: import type { Event } from '@/types/generated'"
+echo "3. Import types in your frontend from the configured output path"
+echo "4. Check config/types-generator.php to customize paths and settings"

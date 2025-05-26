@@ -4,6 +4,7 @@ namespace Codemystify\TypesGenerator\Services;
 
 use Codemystify\TypesGenerator\Contracts\SchemaAnalyzerInterface;
 use Codemystify\TypesGenerator\Exceptions\SchemaAnalysisException;
+use Codemystify\TypesGenerator\Utils\PathResolver;
 use Codemystify\TypesGenerator\Utils\TypeMapper;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -94,7 +95,7 @@ class MigrationAnalyzer implements SchemaAnalyzerInterface
 
     private function getMigrationFiles(): array
     {
-        $path = $this->config['sources']['migrations_path'];
+        $path = PathResolver::resolve($this->config['sources']['migrations_path']);
 
         if (! is_dir($path)) {
             return [];

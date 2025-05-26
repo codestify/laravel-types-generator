@@ -1,7 +1,6 @@
 <?php
 
 use Codemystify\TypesGenerator\Services\MigrationAnalyzer;
-use Illuminate\Support\Facades\File;
 
 describe('MigrationAnalyzer', function () {
 

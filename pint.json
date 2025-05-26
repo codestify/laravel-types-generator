@@ -7,7 +7,9 @@
             "default": "single_space"
         },
         "blank_line_before_statement": {
-            "statements": ["return"]
+            "statements": [
+                "return"
+            ]
         },
         "phpdoc_separation": true,
         "phpdoc_single_line_var_spacing": true

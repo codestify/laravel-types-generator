@@ -3,16 +3,18 @@
 namespace Codemystify\TypesGenerator\Services;
 
 use Illuminate\Http\Resources\Json\JsonResource;
-use ReflectionClass;
 use ReflectionMethod;
 
 class SimpleReflectionAnalyzer
 {
     private array $config;
 
+    private AstAnalyzer $astAnalyzer;
+
     public function __construct()
     {
         $this->config = config('types-generator');
+        $this->astAnalyzer = new AstAnalyzer;
     }
 
     public function analyzeMethod(ReflectionMethod $method, array $schemaInfo): array
@@ -39,125 +41,76 @@ class SimpleReflectionAnalyzer
         try {
             $resourceClass = $method->getDeclaringClass()->getName();
 
-            // For complex resources with method calls, prefer parsing over execution
-            if ($this->isComplexResource($resourceClass)) {
-                $parsedStructure = $this->parseResourceMethodBodies($method);
-                if (! empty($parsedStructure)) {
-                    return $parsedStructure;
+            // Use AST-based analysis for all resources
+            $astResult = $this->astAnalyzer->analyzeMethodReturnStructure($method);
+
+            if ($astResult && $astResult['type'] !== 'unknown') {
+                // Extract the structure from the AST result
+                if ($astResult['type'] === 'object' && isset($astResult['structure'])) {
+                    return $this->postProcessUnknownTypes($astResult['structure']);
                 }
+
+                return $astResult;
             }
 
-            // Try to create a real instance with actual data
-            $realOutput = $this->tryRealResourceExecution($resourceClass, $schemaInfo);
-
-            if ($realOutput !== null) {
-                return $this->analyzeArrayStructure($realOutput);
-            }
-
-            // Fallback to sample data
+            // Fallback: Try to create a real instance with sample data
             $sampleData = $this->createSampleData($resourceClass, $schemaInfo);
 
-            if (! $sampleData) {
-                return $this->parseResourceMethodBodies($method);
+            if ($sampleData) {
+                $resource = new $resourceClass($sampleData);
+                $output = $resource->toArray(request());
+                $analyzed = $this->analyzeArrayStructure($output);
+
+                return $this->postProcessUnknownTypes($analyzed);
             }
 
-            // Create resource instance and get array output
-            $resource = new $resourceClass($sampleData);
-            $output = $resource->toArray(request());
-
-            return $this->analyzeArrayStructure($output);
+            return ['type' => 'unknown'];
 
         } catch (\Exception $e) {
-            // Enhanced fallback - parse method bodies
-            return $this->parseResourceMethodBodies($method);
+            return ['type' => 'unknown', 'error' => $e->getMessage()];
         }
     }
 
-    private function isComplexResource(string $resourceClass): bool
+    /**
+     * Process the analyzed structure with type processors to resolve unknowns
+     */
+    private function processWithTypeProcessors(array $structure, ReflectionMethod $method, array $schemaInfo): array
     {
-        // Resources that use method calls and are complex to execute
-        $complexResources = [
-            'OverviewResource',
+        $processors = $this->getTypeProcessors();
+        $resourceClass = $method->getDeclaringClass();
+        $modelClass = $this->findCorrespondingModel($resourceClass->getName());
+
+        // Build context for processors
+        $context = [
+            'resourceClass' => $resourceClass->getName(),
+            'methodSource' => $this->getMethodSource($method),
+            'schemaInfo' => $schemaInfo,
         ];
 
-        foreach ($complexResources as $complex) {
-            if (str_contains($resourceClass, $complex)) {
-                return true;
-            }
+        if ($modelClass) {
+            $context['modelClass'] = $modelClass;
+            $context['tableName'] = $this->getTableName($modelClass);
         }
 
-        return false;
-    }
-
-    private function tryRealResourceExecution(string $resourceClass, array $schemaInfo): ?array
-    {
-        // Disabled real execution for now due to model dependencies
-        // Fall back to intelligent parsing instead
-        return null;
-    }
-
-    private function tryOverviewResourceExecution(): ?array
-    {
-        try {
-            // Try to find an existing Event, or create a mock one
-            $eventClass = $this->config['namespaces']['models'].'\\Event';
-
-            if (! class_exists($eventClass)) {
-                return null;
+        // Handle different structure formats
+        if (isset($structure['structure']) && is_array($structure['structure'])) {
+            // Process nested structure
+            foreach ($structure['structure'] as $property => &$typeInfo) {
+                if (is_array($typeInfo) && isset($typeInfo['type']) && $typeInfo['type'] === 'unknown') {
+                    $resolved = $this->resolveWithProcessors($property, $typeInfo, $context, $processors);
+                    if ($resolved) {
+                        $typeInfo = $resolved;
+                    }
+                }
             }
-
-            // Create a mock event with the necessary properties and proper dates
-            $event = new $eventClass;
-            $event->id = 1;
-            $event->ulid = 'sample_ulid';
-            $event->title = 'Sample Event';
-            $event->description = 'Sample description';
-            $event->start_date = now();
-            $event->end_date = now()->addHours(2);
-            $event->venue_name = 'Sample Venue';
-            $event->visibility = 'public';
-            $event->orders_count = 10;
-            $event->likes_count = 5;
-            $event->saves_count = 3;
-
-            // Mock address relationship
-            $event->setRelation('address', (object) [
-                'line1' => 'Sample Address',
-                'city' => 'Sample City',
-                'state' => 'Sample State',
-                'country' => 'Sample Country',
-            ]);
-
-            // Try to use the resource
-            $resourceClass = 'App\\Http\\Resources\\Event\\Manage\\OverviewResource';
-            $resource = new $resourceClass($event);
-
-            return $resource->toArray(request());
-
-        } catch (\Exception $e) {
-            // If real execution fails, return null to fall back to parsing
-            return null;
-        }
-    }
-
-    private function parseResourceMethodBodies(ReflectionMethod $method): array
-    {
-        $source = $this->getMethodSource($method);
-
-        // Look for method calls and variable assignments to infer structure
-        $structure = [];
-
-        // Parse return array structure - handle multi-line arrays
-        if (preg_match('/return\s*\[(.*?)\]/s', $source, $matches)) {
-            $arrayContent = $matches[1];
-
-            // Look for 'key' => value patterns with proper multi-line handling
-            if (preg_match_all("/'([^']+)'\s*=>\s*([^,\n\]]+)/", $arrayContent, $keyMatches, PREG_SET_ORDER)) {
-                foreach ($keyMatches as $match) {
-                    $key = $match[1];
-                    $value = trim($match[2]);
-
-                    $structure[$key] = $this->inferTypeFromAssignment($value, $method->getDeclaringClass());
+        } elseif (is_array($structure)) {
+            // Process flat structure (each key is a property with its type info)
+            foreach ($structure as $property => &$typeInfo) {
+                if (is_array($typeInfo) && isset($typeInfo['type']) && $typeInfo['type'] === 'unknown') {
+                    $resolved = $this->resolveWithProcessors($property, $typeInfo, $context, $processors);
+                    if ($resolved) {
+                        $typeInfo = $resolved;
+                    }
                 }
             }
         }
@@ -165,173 +118,61 @@ class SimpleReflectionAnalyzer
         return $structure;
     }
 
-    private function inferTypeFromAssignment(string $assignment, ReflectionClass $class): array
+    /**
+     * Get all available type processors
+     */
+    private function getTypeProcessors(): array
     {
-        // Handle method calls
-        if (preg_match('/\$this->(\w+)\(\)/', $assignment, $matches)) {
-            $methodName = $matches[1];
+        return [
+            // Temporarily disable all processors
+        ];
+    }
 
-            return match ($methodName) {
-                'getManageEventData' => [
-                    'type' => 'object',
-                    'description' => 'Event management data',
-                    'structure' => $this->getManageEventDataStructure(),
-                ],
-                'calculateStats' => [
-                    'type' => 'object',
-                    'description' => 'Event statistics',
-                    'structure' => $this->getStatsStructure(),
-                ],
-                'getTicketTypesWithSales' => [
-                    'type' => 'array',
-                    'description' => 'Ticket types with sales data',
-                    'items' => ['type' => 'object', 'structure' => $this->getTicketTypeStructure()],
-                ],
-                'getRecentActivity' => [
-                    'type' => 'array',
-                    'description' => 'Recent event activity',
-                    'items' => ['type' => 'object', 'structure' => $this->getActivityStructure()],
-                ],
-                default => ['type' => 'unknown', 'description' => "Result from {$methodName}"]
-            };
+    /**
+     * Resolve unknown type using processors
+     */
+    private function resolveWithProcessors(string $property, array $currentType, array $context, array $processors): ?array
+    {
+        // Sort processors by priority (higher first)
+        usort($processors, fn ($a, $b) => $b->getPriority() <=> $a->getPriority());
+
+        foreach ($processors as $processor) {
+            if ($processor->canProcess($property, $currentType, $context)) {
+                $result = $processor->process($property, $currentType, $context);
+                if ($result && $result['type'] !== 'unknown') {
+                    return $result;
+                }
+            }
         }
 
-        // Handle variables
-        if (preg_match('/\$(\w+)/', $assignment, $matches)) {
-            $varName = $matches[1];
+        return null;
+    }
 
-            return match ($varName) {
-                'stats' => ['type' => 'object', 'structure' => $this->getStatsStructure()],
-                'ticketTypes' => ['type' => 'array', 'items' => ['type' => 'object', 'structure' => $this->getTicketTypeStructure()]],
-                'recentActivity' => ['type' => 'array', 'items' => ['type' => 'object', 'structure' => $this->getActivityStructure()]],
-                default => ['type' => 'unknown']
-            };
+    /**
+     * Get the source code of a method for analysis
+     */
+    private function getMethodSource(ReflectionMethod $method): ?string
+    {
+        try {
+            $filename = $method->getFileName();
+            if (! $filename) {
+                return null;
+            }
+
+            $source = file_get_contents($filename);
+            $startLine = $method->getStartLine() - 1;
+            $endLine = $method->getEndLine();
+
+            return implode("\n", array_slice(explode("\n", $source), $startLine, $endLine - $startLine));
+        } catch (\Exception $e) {
+            return null;
         }
-
-        return ['type' => 'unknown'];
-    }
-
-    private function getStatsStructure(): array
-    {
-        return [
-            'soldTickets' => ['type' => 'number'],
-            'checkInsToday' => ['type' => 'number'],
-            'conversionRate' => ['type' => 'number'],
-            'totalRevenue' => ['type' => 'number'],
-        ];
-    }
-
-    private function getTicketTypeStructure(): array
-    {
-        return [
-            'id' => ['type' => 'number'],
-            'name' => ['type' => 'string'],
-            'price' => ['type' => 'number'],
-            'quantity' => ['type' => 'number'],
-            'sold' => ['type' => 'number'],
-        ];
-    }
-
-    private function getManageEventDataStructure(): array
-    {
-        return [
-            'id' => ['type' => 'number'],
-            'title' => ['type' => 'string'],
-            'description' => ['type' => 'string'],
-            'status' => ['type' => 'number'],
-            'start_date' => ['type' => 'string'],
-            'end_date' => ['type' => 'string'],
-            'location' => [
-                'type' => 'object',
-                'structure' => [
-                    'line1' => ['type' => 'string'],
-                    'line2' => ['type' => 'string', 'nullable' => true],
-                    'city' => ['type' => 'string'],
-                    'state' => ['type' => 'string'],
-                    'country' => ['type' => 'string'],
-                    'postal_code' => ['type' => 'string', 'nullable' => true],
-                ],
-            ],
-            'organization' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'name' => ['type' => 'string'],
-                    'slug' => ['type' => 'string'],
-                    'description' => ['type' => 'string', 'nullable' => true],
-                    'is_verified' => ['type' => 'boolean'],
-                ],
-            ],
-            'user' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'name' => ['type' => 'string'],
-                    'email' => ['type' => 'string'],
-                ],
-            ],
-        ];
-    }
-
-    private function getActivityStructure(): array
-    {
-        return [
-            'id' => ['type' => 'number'],
-            'description' => ['type' => 'string'],
-            'created_at' => ['type' => 'string'],
-            'user' => [
-                'type' => 'object',
-                'structure' => [
-                    'name' => ['type' => 'string'],
-                    'email' => ['type' => 'string'],
-                ],
-            ],
-        ];
     }
 
     private function analyzeControllerMethod(ReflectionMethod $method, array $schemaInfo): array
     {
-        $source = $this->getMethodSource($method);
-
-        // Look for Inertia::render calls
-        if (preg_match('/Inertia::render\([^,]+,\s*\[(.*?)\]/s', $source, $matches)) {
-            $arrayContent = $matches[1];
-
-            // Parse the props structure
-            $structure = [];
-            if (preg_match_all("/'([^']+)'\s*=>\s*([^,\n\]]+)/", $arrayContent, $propMatches, PREG_SET_ORDER)) {
-                foreach ($propMatches as $match) {
-                    $key = $match[1];
-                    $value = trim($match[2]);
-
-                    $structure[$key] = $this->inferInertiaPropsType($value);
-                }
-            }
-
-            return $structure;
-        }
-
-        return [];
-    }
-
-    private function inferInertiaPropsType(string $value): array
-    {
-        // Handle Resource::make() calls
-        if (preg_match('/(\w+Resource)::make\(/', $value, $matches)) {
-            $resourceName = $matches[1];
-
-            // Map known resources to their types
-            return match ($resourceName) {
-                'OverviewResource' => [
-                    'type' => 'object',
-                    'description' => 'Overview resource data',
-                    'reference' => 'OverviewData', // Reference the other interface
-                ],
-                default => ['type' => 'object', 'description' => "Data from {$resourceName}"]
-            };
-        }
-
-        return ['type' => 'unknown'];
+        // Use AST analyzer for controller method analysis too
+        return $this->astAnalyzer->analyzeMethodReturnStructure($method);
     }
 
     private function createSampleData(string $resourceClass, array $schemaInfo): mixed
@@ -451,41 +292,30 @@ class SimpleReflectionAnalyzer
         return ['type' => 'unknown'];
     }
 
-    private function parseMethodSource(ReflectionMethod $method): array
+    private function findCorrespondingModel(?string $resourceClass = null): ?string
     {
-        // Simple regex-based parsing as fallback
-        $source = $this->getMethodSource($method);
-
-        // Look for simple return array patterns
-        if (preg_match('/return\s*\[(.*?)\]/s', $source, $matches)) {
-            return $this->parseSimpleArray($matches[1]);
+        if (! $resourceClass) {
+            return null;
         }
 
-        return [];
-    }
-
-    private function parseSimpleArray(string $arrayContent): array
-    {
-        $structure = [];
-
-        // Simple regex to find 'key' => value patterns
-        if (preg_match_all("/'([^']+)'\s*=>/", $arrayContent, $matches)) {
-            foreach ($matches[1] as $key) {
-                $structure[$key] = ['type' => 'unknown'];
-            }
-        }
-
-        return $structure;
-    }
-
-    private function findCorrespondingModel(string $resourceClass): ?string
-    {
+        // Extract model name from resource class name
         $resourceName = class_basename($resourceClass);
         $modelName = str_replace('Resource', '', $resourceName);
 
+        // Build model class path from configuration
         $modelClass = $this->config['namespaces']['models'].'\\'.$modelName;
 
-        return class_exists($modelClass) ? $modelClass : null;
+        // Verify the model exists and is actually a Laravel model
+        if (class_exists($modelClass)) {
+            if (is_subclass_of($modelClass, \Illuminate\Database\Eloquent\Model::class)) {
+                return $modelClass;
+            }
+
+            // If it's not an Eloquent model but class exists, still return it
+            return $modelClass;
+        }
+
+        return null;
     }
 
     private function getTableName(string $modelClass): string
@@ -500,27 +330,379 @@ class SimpleReflectionAnalyzer
         }
     }
 
-    private function getMethodSource(ReflectionMethod $method): string
+    /**
+     * Post-process analyzed structure to fix common unknown types using intelligent pattern analysis
+     */
+    private function postProcessUnknownTypes(array $structure, ?string $resourceClass = null): array
     {
-        $filename = $method->getFileName();
-        $startLine = $method->getStartLine() - 1;
-        $endLine = $method->getEndLine();
-        $length = $endLine - $startLine;
+        foreach ($structure as $property => &$typeInfo) {
+            if (is_array($typeInfo)) {
+                // Recursively process nested structures
+                if (isset($typeInfo['structure']) && is_array($typeInfo['structure'])) {
+                    $typeInfo['structure'] = $this->postProcessUnknownTypes($typeInfo['structure'], $resourceClass);
+                }
 
-        $source = file($filename);
+                // Fix null types that should be nullable strings (formatted_ patterns)
+                if ($typeInfo['type'] === 'null' && str_starts_with($property, 'formatted_')) {
+                    $typeInfo = ['type' => 'string', 'nullable' => true];
+                }
 
-        return implode('', array_slice($source, $startLine, $length));
+                // Fix unknown types with intelligent analysis
+                elseif ($typeInfo['type'] === 'unknown') {
+                    $typeInfo = $this->intelligentPatternAnalysisWithContext($property, $resourceClass);
+                }
+            }
+        }
+
+        return $structure;
+    }
+
+    /**
+     * Enhanced pattern analysis with resource context for better accuracy
+     */
+    private function intelligentPatternAnalysisWithContext(string $property, ?string $resourceClass = null): array
+    {
+        // Try enhanced analysis with resource context first
+        if ($resourceClass && $this->looksLikeRelationshipPropertyWithContext($property, $resourceClass)) {
+            return $this->inferRelationshipStructureWithContext($property, $resourceClass);
+        }
+
+        // Fall back to generic pattern analysis
+        return $this->intelligentPatternAnalysis($property);
+    }
+
+    /**
+     * Infer relationship structure with actual model context when available
+     */
+    private function inferRelationshipStructureWithContext(string $property, string $resourceClass): array
+    {
+        $modelClass = $this->findCorrespondingModel($resourceClass);
+
+        if ($modelClass) {
+            // Try to get actual relationship info from the model
+            $relationshipFields = $this->analyzeActualRelationship($property, $modelClass);
+            if (! empty($relationshipFields)) {
+                return [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'structure' => $relationshipFields,
+                ];
+            }
+        }
+
+        // Fall back to generic relationship structure
+        return $this->inferRelationshipStructure($property);
+    }
+
+    /**
+     * Analyze actual relationship from model to get real field structure
+     */
+    private function analyzeActualRelationship(string $property, string $modelClass): array
+    {
+        try {
+            $model = new $modelClass;
+            $reflection = new \ReflectionClass($model);
+
+            if ($reflection->hasMethod($property)) {
+                $method = $reflection->getMethod($property);
+
+                try {
+                    $relation = $method->invoke($model);
+                    if ($relation instanceof \Illuminate\Database\Eloquent\Relations\Relation) {
+                        // Get the related model and analyze its structure
+                        $relatedModel = $relation->getRelated();
+
+                        return $this->getBasicModelFields($relatedModel);
+                    }
+                } catch (\Exception $e) {
+                    // Relationship might require data or fail for other reasons
+                }
+            }
+        } catch (\Exception $e) {
+            // Model instantiation failed
+        }
+
+        return [];
+    }
+
+    /**
+     * Get basic fields from a model instance (fillable, visible, or common fields)
+     */
+    private function getBasicModelFields(\Illuminate\Database\Eloquent\Model $model): array
+    {
+        $fields = ['id' => ['type' => 'string']]; // All models have ID
+
+        // Try to get fillable fields
+        $fillable = $model->getFillable();
+        if (! empty($fillable)) {
+            foreach (array_slice($fillable, 0, 3) as $field) { // Limit to first 3 for brevity
+                if (! str_ends_with($field, '_id')) { // Skip foreign keys
+                    $fields[$field] = ['type' => 'string'];
+                }
+            }
+        } else {
+            // Default minimal structure
+            $fields['name'] = ['type' => 'string'];
+        }
+
+        return $fields;
     }
 
     private function isResourceClass(string $className): bool
     {
         return str_contains($className, 'Resource') ||
-               is_subclass_of($className, JsonResource::class);
+            is_subclass_of($className, JsonResource::class);
     }
 
     private function isControllerClass(string $className): bool
     {
         return str_contains($className, 'Controller') ||
-               is_subclass_of($className, 'Illuminate\\Routing\\Controller');
+            is_subclass_of($className, 'Illuminate\\Routing\\Controller');
+    }
+
+    /**
+     * Simple dynamic type inference for unknown properties using intelligent Laravel pattern analysis
+     */
+    private function inferUnknownType(string $property): array
+    {
+        // Try to intelligently resolve by analyzing Laravel patterns
+        return $this->intelligentPatternAnalysis($property);
+    }
+
+    /**
+     * Intelligent pattern analysis based on generic Laravel conventions (works for any domain)
+     */
+    private function intelligentPatternAnalysis(string $property): array
+    {
+        // Pattern 1: Formatted values (getFormattedXxxAttribute pattern)
+        if (str_starts_with($property, 'formatted_')) {
+            return ['type' => 'string', 'nullable' => true];
+        }
+
+        // Pattern 2: Common Laravel enum field names (domain-agnostic)
+        if (in_array($property, ['status', 'visibility', 'type', 'state', 'role', 'level', 'priority'])) {
+            return ['type' => 'string', 'description' => 'Enum value'];
+        }
+
+        // Pattern 3: Date/timestamp fields - common Carbon method results
+        if (in_array($property, ['start', 'end']) || str_contains($property, 'timestamp')) {
+            return ['type' => 'number', 'description' => 'Timestamp (valueOf() result)'];
+        }
+
+        // Pattern 4: Generic relationship detection
+        if ($this->looksLikeRelationshipProperty($property)) {
+            return $this->inferRelationshipStructure($property);
+        }
+
+        // Pattern 5: Boolean patterns (Laravel accessor conventions)
+        if (str_starts_with($property, 'is_') || str_starts_with($property, 'has_') || str_starts_with($property, 'can_')) {
+            return ['type' => 'boolean'];
+        }
+
+        // Pattern 6: Date/time patterns (Laravel convention)
+        if (str_contains($property, 'date') || str_contains($property, 'time') ||
+            in_array($property, ['created_at', 'updated_at', 'deleted_at'])) {
+            return ['type' => 'string', 'description' => 'Date/time string'];
+        }
+
+        // Pattern 7: ID fields (Laravel convention)
+        if ($property === 'id' || str_ends_with($property, '_id')) {
+            return ['type' => 'string']; // Support for ULIDs/UUIDs
+        }
+
+        // Pattern 8: Numeric fields (common patterns across domains)
+        if (in_array($property, ['latitude', 'longitude', 'amount', 'price', 'cost', 'total', 'count', 'quantity'])) {
+            return ['type' => 'number'];
+        }
+
+        // Pattern 9: URL/path fields (common web app patterns)
+        if (str_contains($property, 'url') || str_contains($property, 'path') || str_contains($property, 'link')) {
+            return ['type' => 'string'];
+        }
+
+        // Default fallback - safe for any domain
+        return ['type' => 'string', 'nullable' => true];
+    }
+
+    /**
+     * Check if property name suggests it's a relationship using dynamic Laravel model analysis
+     */
+    private function looksLikeRelationshipProperty(string $property): bool
+    {
+        // Try to find and analyze the actual model to detect real relationships
+        // Since we don't have resource class context here, this will return null
+        $modelClass = $this->findCorrespondingModel(null);
+
+        if ($modelClass) {
+            return $this->isActualModelRelationship($property, $modelClass);
+        }
+
+        // If no model found, use generic Laravel naming conventions
+        return $this->hasGenericRelationshipPatterns($property);
+    }
+
+    /**
+     * Check if property is an actual relationship method in the model
+     */
+    private function isActualModelRelationship(string $property, string $modelClass): bool
+    {
+        try {
+            $model = new $modelClass;
+            $reflection = new \ReflectionClass($model);
+
+            // Check if method exists and could be a relationship
+            if ($reflection->hasMethod($property)) {
+                $method = $reflection->getMethod($property);
+
+                // Skip if method requires parameters (relationships don't)
+                if ($method->getNumberOfRequiredParameters() > 0) {
+                    return false;
+                }
+
+                // Try to invoke and check if it returns a relationship
+                try {
+                    $result = $method->invoke($model);
+
+                    return $result instanceof \Illuminate\Database\Eloquent\Relations\Relation;
+                } catch (\Exception $e) {
+                    // Method might fail for other reasons, but that's ok
+                    return false;
+                }
+            }
+        } catch (\Exception $e) {
+            // Model instantiation or reflection failed
+        }
+
+        return false;
+    }
+
+    /**
+     * Use generic Laravel naming patterns when model analysis isn't available
+     */
+    private function hasGenericRelationshipPatterns(string $property): bool
+    {
+        // Generic Laravel relationship patterns that work across domains
+        return
+            // Plural forms suggest hasMany/belongsToMany relationships
+            str_ends_with($property, 's') && ! str_ends_with($property, 'ss') ||
+
+            // Common relationship suffixes across all domains
+            str_ends_with($property, '_items') ||
+            str_ends_with($property, '_list') ||
+
+            // Compound property names suggest relationships
+            str_contains($property, '_') && ! str_starts_with($property, 'is_') && ! str_starts_with($property, 'has_') ||
+
+            // Foreign key patterns suggest belongsTo relationships
+            str_ends_with($property, '_id') && strlen($property) > 3;
+    }
+
+    /**
+     * Enhanced relationship property detection with context
+     */
+    private function looksLikeRelationshipPropertyWithContext(string $property, string $resourceClass): bool
+    {
+        $modelClass = $this->findCorrespondingModel($resourceClass);
+
+        if ($modelClass) {
+            return $this->isActualModelRelationship($property, $modelClass);
+        }
+
+        return $this->hasGenericRelationshipPatterns($property);
+    }
+
+    /**
+     * Infer structure for relationship-like properties using dynamic analysis
+     */
+    private function inferRelationshipStructure(string $property): array
+    {
+        // Base structure for all relationships
+        $baseStructure = ['id' => ['type' => 'string']];
+
+        // Dynamically infer additional fields based on property name patterns
+        $additionalFields = $this->inferRelationshipFields($property);
+        $structure = array_merge($baseStructure, $additionalFields);
+
+        return [
+            'type' => 'object',
+            'nullable' => true,
+            'structure' => $structure,
+        ];
+    }
+
+    /**
+     * Dynamically infer relationship fields using actual model analysis when possible
+     */
+    private function inferRelationshipFields(string $property): array
+    {
+        $fields = [];
+
+        // Try to analyze the actual related model if possible
+        $relatedModelFields = $this->analyzeRelatedModel($property);
+        if (! empty($relatedModelFields)) {
+            return $relatedModelFields;
+        }
+
+        // Fallback to minimal generic structure that works for any domain
+        // Only add 'name' field if the property name suggests it has one
+        if ($this->propertyLikelyHasName($property)) {
+            $fields['name'] = ['type' => 'string'];
+        }
+
+        // Add 'title' if property suggests it (common in content management)
+        if ($this->propertyLikelyHasTitle($property)) {
+            $fields['title'] = ['type' => 'string'];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Try to analyze the actual related model to get real field structure
+     */
+    private function analyzeRelatedModel(string $property): array
+    {
+        // This could be enhanced to actually find and analyze the related model
+        // For now, return empty to use generic fallback
+        // In a full implementation, this would:
+        // 1. Find the model class
+        // 2. Check its fillable/visible fields
+        // 3. Return actual field structure
+        return [];
+    }
+
+    /**
+     * Generic check if a property likely has a 'name' field
+     */
+    private function propertyLikelyHasName(string $property): bool
+    {
+        // Most entities have a name field, but not all
+        // Exclude technical/system relationships that might not
+        $excludePatterns = ['token', 'session', 'log', 'audit', 'permission'];
+
+        foreach ($excludePatterns as $pattern) {
+            if (str_contains($property, $pattern)) {
+                return false;
+            }
+        }
+
+        return true; // Most relationships have a name
+    }
+
+    /**
+     * Generic check if a property likely has a 'title' field
+     */
+    private function propertyLikelyHasTitle(string $property): bool
+    {
+        // Only content-like entities typically have titles
+        $titlePatterns = ['post', 'article', 'page', 'event', 'project', 'task'];
+
+        foreach ($titlePatterns as $pattern) {
+            if (str_contains($property, $pattern)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

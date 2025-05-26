@@ -7,11 +7,11 @@ return [
     |--------------------------------------------------------------------------
     */
     'output' => [
-        'path' => base_path('resources/js/types/generated'),
-        'filename_pattern' => '{group}.ts',
-        'index_file' => true,
-        'backup_old_files' => true,
-        'create_directories' => true,
+        'path' => env('TYPES_GENERATOR_OUTPUT_PATH', base_path('resources/js/types/generated')),
+        'filename_pattern' => env('TYPES_GENERATOR_FILENAME_PATTERN', '{group}.ts'),
+        'index_file' => env('TYPES_GENERATOR_INDEX_FILE', true),
+        'backup_old_files' => env('TYPES_GENERATOR_BACKUP', true),
+        'create_directories' => env('TYPES_GENERATOR_CREATE_DIRS', true),
     ],
 
     /*
@@ -20,10 +20,10 @@ return [
     |--------------------------------------------------------------------------
     */
     'sources' => [
-        'resources_path' => base_path('app/Http/Resources'),
-        'controllers_path' => base_path('app/Http/Controllers'),
-        'models_path' => base_path('app/Models'),
-        'migrations_path' => base_path('database/migrations'),
+        'resources_path' => env('TYPES_GENERATOR_RESOURCES_PATH', base_path('app/Http/Resources')),
+        'controllers_path' => env('TYPES_GENERATOR_CONTROLLERS_PATH', base_path('app/Http/Controllers')),
+        'models_path' => env('TYPES_GENERATOR_MODELS_PATH', base_path('app/Models')),
+        'migrations_path' => env('TYPES_GENERATOR_MIGRATIONS_PATH', base_path('database/migrations')),
     ],
 
     /*
@@ -32,9 +32,9 @@ return [
     |--------------------------------------------------------------------------
     */
     'namespaces' => [
-        'resources' => 'App\\Http\\Resources',
-        'controllers' => 'App\\Http\\Controllers',
-        'models' => 'App\\Models',
+        'resources' => env('TYPES_GENERATOR_RESOURCES_NAMESPACE', 'App\\Http\\Resources'),
+        'controllers' => env('TYPES_GENERATOR_CONTROLLERS_NAMESPACE', 'App\\Http\\Controllers'),
+        'models' => env('TYPES_GENERATOR_MODELS_NAMESPACE', 'App\\Models'),
     ],
 
     /*

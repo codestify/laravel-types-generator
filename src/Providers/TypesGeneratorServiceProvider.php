@@ -14,7 +14,7 @@ class TypesGeneratorServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(
-            __DIR__.'/../../config/types-generator.php',
+            $this->getConfigPath(),
             'types-generator'
         );
 
@@ -35,7 +35,7 @@ class TypesGeneratorServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([
-                __DIR__.'/../../config/types-generator.php' => config_path('types-generator.php'),
+                $this->getConfigPath() => config_path('types-generator.php'),
             ], 'types-generator-config');
 
             $this->commands([
@@ -49,5 +49,13 @@ class TypesGeneratorServiceProvider extends ServiceProvider
         return [
             TypeGeneratorService::class,
         ];
+    }
+
+    /**
+     * Get the path to the package config file
+     */
+    private function getConfigPath(): string
+    {
+        return realpath(__DIR__.'/../../config/types-generator.php') ?: __DIR__.'/../../config/types-generator.php';
     }
 }

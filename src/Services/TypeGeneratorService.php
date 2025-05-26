@@ -3,6 +3,7 @@
 namespace Codemystify\TypesGenerator\Services;
 
 use Codemystify\TypesGenerator\Attributes\GenerateTypes;
+use Codemystify\TypesGenerator\Utils\PathResolver;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use ReflectionClass;
@@ -65,18 +66,20 @@ class TypeGeneratorService
 
     private function scanDirectory(string $path, string $namespace): array
     {
-        if (! is_dir($path)) {
+        $resolvedPath = PathResolver::resolve($path);
+
+        if (! is_dir($resolvedPath)) {
             return [];
         }
 
         $methods = [];
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($path)
+            new RecursiveDirectoryIterator($resolvedPath)
         );
         $phpFiles = new RegexIterator($iterator, '/\.php$/');
 
         foreach ($phpFiles as $file) {
-            $className = $this->getClassNameFromFile($file->getPathname(), $namespace, $path);
+            $className = $this->getClassNameFromFile($file->getPathname(), $namespace, $resolvedPath);
 
             if (! $className || ! class_exists($className)) {
                 continue;
