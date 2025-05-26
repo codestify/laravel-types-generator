@@ -6,7 +6,7 @@
 
 [![Latest Version](https://img.shields.io/packagist/v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
 [![PHP Version](https://img.shields.io/packagist/php-v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
-[![Laravel Version](https://img.shields.io/badge/Laravel-11.0+-red.svg)](https://laravel.com)
+[![Laravel Version](https://img.shields.io/badge/Laravel-11%2B%20%7C%2012%2B-red.svg)](https://laravel.com)
 [![License](https://img.shields.io/packagist/l/codemystify/laravel-types-generator)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-green.svg)](https://github.com/codemystify/laravel-types-generator)
 
@@ -648,7 +648,7 @@ php artisan generate:types --group=test --verbose
 
 ### ✅ System Requirements
 - **PHP:** 8.2 or higher
-- **Laravel:** 11.0 or higher
+- **Laravel:** 11.0+ or 12.0+
 - **Composer:** 2.0 or higher
 
 </td>
@@ -664,7 +664,7 @@ php artisan generate:types --group=test --verbose
 </tr>
 </table>
 
-> **⚠️ Laravel Version Support:** This package only supports Laravel 11+. For Laravel 10 and below, please use an earlier version of this package.
+> **⚠️ Laravel Version Support:** This package supports Laravel 11+ and Laravel 12+. For Laravel 10 and below, please use an earlier version of this package.
 
 ---
 
