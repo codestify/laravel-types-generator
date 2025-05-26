@@ -14,7 +14,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          # PHP 8.2 - Laravel 11 only (Laravel 12 requires PHP 8.3+)
+          # PHP 8.2 - Laravel 11 (stable combination)
           - php: 8.2
             laravel: 11.*
             testbench: 9.*
@@ -24,15 +24,7 @@ jobs:
             testbench: 9.*
             stability: prefer-stable
           
-          # PHP 8.3 - Both Laravel versions
-          - php: 8.3
-            laravel: 11.*
-            testbench: 9.*
-            stability: prefer-lowest
-          - php: 8.3
-            laravel: 11.*
-            testbench: 9.*
-            stability: prefer-stable
+          # PHP 8.3 - Laravel 12 (your production setup)
           - php: 8.3
             laravel: 12.*
             testbench: 10.*
