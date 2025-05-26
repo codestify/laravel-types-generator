@@ -1,0 +1,88 @@
+{
+    "name": "codemystify/laravel-types-generator",
+    "description": "Enterprise-grade TypeScript types generator for Laravel applications with advanced error handling and performance optimization",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "laravel",
+        "typescript",
+        "types",
+        "generator",
+        "api",
+        "resources",
+        "inertia",
+        "frontend",
+        "php",
+        "javascript",
+        "automation",
+        "development"
+    ],
+    "authors": [
+        {
+            "name": "Ali Shah",
+            "email": "ali@codemystify.com",
+            "homepage": "https://codemystify.com",
+            "role": "Developer"
+        }
+    ],
+    "homepage": "https://github.com/codemystify/laravel-types-generator",
+    "support": {
+        "issues": "https://github.com/codemystify/laravel-types-generator/issues",
+        "source": "https://github.com/codemystify/laravel-types-generator",
+        "docs": "https://github.com/codemystify/laravel-types-generator/wiki"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "require": {
+        "php": "^8.2|^8.3",
+        "illuminate/support": "^11.0",
+        "illuminate/console": "^11.0",
+        "illuminate/filesystem": "^11.0",
+        "nikic/php-parser": "^4.15|^5.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0|^11.0",
+        "orchestra/testbench": "^9.0",
+        "pestphp/pest": "^2.0",
+        "pestphp/pest-plugin-laravel": "^2.0",
+        "mockery/mockery": "^1.6",
+        "laravel/pint": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Codemystify\\TypesGenerator\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Codemystify\\TypesGenerator\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Codemystify\\TypesGenerator\\Providers\\TypesGeneratorServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "test:unit": "pest tests/Unit",
+        "test:feature": "pest tests/Feature", 
+        "test:coverage": "pest --coverage",
+        "test:coverage-html": "pest --coverage --coverage-html=coverage",
+        "format": "pint",
+        "format:test": "pint --test",
+        "analyse": "phpstan analyse",
+        "quality": [
+            "@format:test",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    }
+}
