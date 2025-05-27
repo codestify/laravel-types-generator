@@ -1,394 +1,357 @@
-# Laravel TypeScript Types Generator
+# Laravel Types Generator
 
-<div align="center">
+I got tired of manually writing TypeScript types for my Laravel APIs, so I built this. It's simple: you tell it exactly what your data looks like, and it generates clean TypeScript interfaces. No magic, no guessing, just straight-forward type generation.
 
-**🚀 Generate TypeScript types directly from your Laravel Resources and Controllers**
+## What This Actually Does
 
-*Domain-agnostic • Pattern-based • Zero configuration required*
+You add an attribute to your Laravel classes (like API resources), define the structure, run a command, and get TypeScript files. That's it.
 
-[![Latest Version](https://img.shields.io/packagist/v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
-[![PHP Version](https://img.shields.io/packagist/php-v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
-[![Laravel Version](https://img.shields.io/badge/Laravel-11%2B%20%7C%2012%2B-red.svg)](https://laravel.com)
-[![License](https://img.shields.io/packagist/l/codemystify/laravel-types-generator)](LICENSE)
-
-</div>
-
----
-
-## 💡 Why This Package?
-
-Automatically generate TypeScript types from your Laravel API responses. **Works with any Laravel project** - e-commerce, CRM, blog, SaaS, or custom applications.
-
-**Key Benefits:**
-- 🔄 **Always in sync** - Types generated from actual code
-- 🚀 **Zero maintenance** - No manual type definitions
-- 🛡️ **Type safety** - Catch errors at compile time
-- ⚡ **Developer experience** - Full IntelliSense and autocomplete
-- 🎯 **Domain-agnostic** - Works with any Laravel project out of the box
-- 🧠 **Smart pattern detection** - Understands Laravel conventions automatically
-
----
-
-## 📦 Installation
+## Installation
 
 ```bash
-# Install the package
 composer require codemystify/laravel-types-generator
-
-# Publish configuration
-php artisan vendor:publish --tag=types-generator-config
-
-# Create output directory
-mkdir -p resources/js/types/generated
 ```
 
----
-## ⚡ Quick Start
+If you want to customize the config:
+```bash
+php artisan vendor:publish --tag=types-generator-config
+```
 
-### 1. Annotate Your Resources
+## Quick Example
+
+Here's how I use it in my Laravel API resources:
 
 ```php
-<?php
-
 use Codemystify\TypesGenerator\Attributes\GenerateTypes;
-use Illuminate\Http\Resources\Json\JsonResource;
 
 class UserResource extends JsonResource
 {
-    #[GenerateTypes(name: 'User', group: 'users')]
+    #[GenerateTypes(
+        name: 'User',
+        structure: [
+            'id' => 'number',
+            'name' => 'string',
+            'email' => 'string',
+            'avatar' => ['type' => 'string', 'optional' => true],
+            'created_at' => 'string',
+        ]
+    )]
     public function toArray($request): array
     {
         return [
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'avatar' => $this->avatar,
             'created_at' => $this->created_at->toISOString(),
-            'is_active' => $this->is_active,
-            'profile' => $this->whenLoaded('profile', function () {
-                return [
-                    'bio' => $this->profile->bio,
-                    'avatar' => $this->profile->avatar_url,
-                ];
-            }),
         ];
     }
 }
 ```
 
-### 2. Generate Types
-
+Run the command:
 ```bash
-php artisan generate:types
+php artisan types:generate
 ```
 
-### 3. Use in Frontend
-
+Get this TypeScript file:
 ```typescript
-import type { User } from '@/types/generated';
-
-const UserCard: React.FC<{ user: User }> = ({ user }) => {
-    return (
-        <div>
-            <h2>{user.name}</h2>
-            <p>{user.email}</p>
-            {user.is_active && <span>Active</span>}
-            {user.profile && (
-                <div>
-                    <p>{user.profile.bio}</p>
-                    <img src={user.profile.avatar} alt="Avatar" />
-                </div>
-            )}
-        </div>
-    );
-};
-```
-
----
-
-## 🔄 How It Works
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    LARAVEL TYPES GENERATOR                     │
-└─────────────────────────────────────────────────────────────────┘
-
-1. DISCOVERY PHASE
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│   App/Http/      │    │   App/Http/      │    │   App/Models/    │
-│   Resources/     │◄──►│   Controllers/   │◄──►│   (Schema Info)  │
-│                  │    │                  │    │                  │
-│ ├─ UserResource  │    │ ├─ UserController │    │ ├─ User.php     │
-│ ├─ PostResource  │    │ ├─ PostController │    │ ├─ Post.php     │
-│ └─ ...           │    │ └─ ...           │    │ └─ ...          │
-└──────────────────┘    └──────────────────┘    └──────────────────┘
-           │                        │                        │
-           │                        │                        │
-           ▼                        ▼                        ▼
-     Scan for #[GenerateTypes] attributes + Analyze DB Schema
-
-2. ANALYSIS PHASE
-┌─────────────────────────────────────────────────────────────────┐
-│                    TypeGeneratorService                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ │
-│  │ SimpleReflection│  │ AstAnalyzer     │  │ MigrationAnalyzer│ │
-│  │ Analyzer        │  │                 │  │                 │ │
-│  │                 │  │ • Parse PHP AST │  │ • Read migrations│ │
-│  │ • Invoke methods│  │ • Extract types │  │ • Build schema  │ │
-│  │ • Analyze output│  │ • Handle complex│  │ • Map DB types  │ │
-│  │ • Pattern match │  │   expressions   │  │   to TS types   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-                     Combine & Process Types
-
-3. GENERATION PHASE
-┌─────────────────────────────────────────────────────────────────┐
-│                   TypeScriptGenerator                          │
-│                                                                 │
-│  ┌─────────────────┐           ┌─────────────────┐              │
-│  │ Group Types     │    ──►    │ Generate Files  │              │
-│  │ • users.ts      │           │ • TypeScript    │              │
-│  │ • posts.ts      │           │   interfaces    │              │
-│  │ • default.ts    │           │ • Comments      │              │
-│  └─────────────────┘           │ • Exports       │              │
-│                                └─────────────────┘              │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-4. OUTPUT PHASE
-┌─────────────────────────────────────────────────────────────────┐
-│            resources/js/types/generated/                       │
-│                                                                 │
-│  ├─ users.ts      ──► export interface User { ... }            │
-│  ├─ posts.ts      ──► export interface Post { ... }            │
-│  ├─ default.ts    ──► export interface Other { ... }           │
-│  └─ index.ts      ──► export * from './users'; ...             │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Process:**
-1. **Discovery**: Scans for `#[GenerateTypes]` attributes in Resources/Controllers
-2. **Analysis**: Uses AST parsing, reflection, and database schema analysis
-3. **Generation**: Creates TypeScript interfaces with proper types
-4. **Output**: Organized files by group with index exports
-
----
-
-## ✨ Features
-
-### Core Capabilities
-- **Domain-Agnostic**: Works with any Laravel project (e-commerce, CRM, blog, etc.)
-- **Attribute-Based**: Use `#[GenerateTypes]` to mark methods for type generation
-- **Smart Pattern Detection**: Automatically recognizes Laravel conventions without configuration
-
-### Analysis Engine
-- **AST Parsing**: Deep code analysis for complex expressions and closures
-- **Database Schema**: Integrates with migrations for accurate property types
-- **Relationship Detection**: Automatically handles `whenLoaded()` and Laravel relationships
-- **Method Tracing**: Follows method calls and trait usage for complete type inference
-
-### Output & Organization
-- **Nested Types**: Automatically extracts and names nested object structures
-- **TypeScript Standards**: Generates clean, readable interfaces with proper documentation
-- **Index Exports**: Creates convenient barrel exports for easy importing
-
-### Developer Experience
-- **Environment Support**: Configure paths via environment variables
-- **Caching**: Built-in caching for faster subsequent generations
-- **Error Handling**: Graceful fallbacks for complex scenarios
-- **Laravel Patterns**: Understands common patterns like enums, dates, and nullable fields
-
----
-
-## 🎯 Smart Pattern Detection
-
-The package automatically recognizes common Laravel patterns without any configuration:
-
-### Property Patterns
-```php
-// Automatically detected as string
-'id', 'uuid', 'ulid', 'title', 'name', 'description', 'slug', 'email'
-
-// Automatically detected as boolean  
-'is_active', 'is_featured', 'has_permission', 'can_edit'
-
-// Automatically detected as number
-'price', 'amount', 'total', 'count', 'quantity'
-
-// Automatically detected as date strings
-'created_at', 'updated_at', 'published_at', 'start_date'
-```
-
-### Relationship Patterns
-```php
-// Category relationships (any field containing 'category')
-'category', 'event_category', 'post_category'
-// → { id: string; name: string; slug: string; }
-
-// Image/Media relationships (any field containing 'image') 
-'cover_image', 'avatar', 'banner', 'profile_image'
-// → { url: string; alt_text?: string; }
-
-// User relationships (any field containing 'user')
-'user', 'created_by', 'assigned_user'
-// → { id: string; name: string; email: string; }
-```
-
-### Method Patterns
-```php
-// Address/location methods
-getFormattedAddress(), getFullAddress()
-// → string | null
-
-// Management data methods  
-getManageUserData(), getManagementData(), getDataForManagement()
-// → Generic object structure
-
-// Analytics methods
-getStats(), calculateAnalytics(), getMetrics()
-// → { total: number; count: number; percentage: number; }
-```
-
-### Laravel Conventions
-- **Enums**: Automatically detects `->value` access and ternary enum patterns
-- **Dates**: Recognizes `->toISOString()`, `->format()` method calls
-- **whenLoaded()**: Properly analyzes closure returns for relationship data
-- **Nullable**: Smart detection of nullable fields based on context
-
----
-
-## 🎯 Commands
-
-```bash
-# Generate all types
-php artisan generate:types
-
-# Generate specific group only
-php artisan generate:types --group=users
-
-# Force regeneration (ignores cache)
-php artisan generate:types --force
-
-# Watch for changes (coming soon)
-php artisan generate:types --watch
-```
-
----
-
-## ⚙️ Configuration
-
-The `config/types-generator.php` file controls all package behavior:
-
-### Output Configuration
-```php
-'output' => [
-    'path' => env('TYPES_GENERATOR_OUTPUT_PATH', base_path('resources/js/types/generated')),
-    'filename_pattern' => env('TYPES_GENERATOR_FILENAME_PATTERN', '{group}.ts'),
-    'index_file' => env('TYPES_GENERATOR_INDEX_FILE', true),
-],
-```
-
-### Source Paths
-```php
-'sources' => [
-    'resources_path' => env('TYPES_GENERATOR_RESOURCES_PATH', base_path('app/Http/Resources')),
-    'controllers_path' => env('TYPES_GENERATOR_CONTROLLERS_PATH', base_path('app/Http/Controllers')),
-    'models_path' => env('TYPES_GENERATOR_MODELS_PATH', base_path('app/Models')),
-],
-```
-
----
-
-## 📄 Output Example
-
-**Generated TypeScript:**
-```typescript
-/**
- * Auto-generated TypeScript types
- * Generated at: 2025-01-26T12:00:00.000Z
- * DO NOT EDIT MANUALLY - This file is auto-generated
- */
-
-/**
- * User resource data structure
- * @source App\Http\Resources\UserResource::toArray
- * @group users
- */
+// user.ts
 export interface User {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-  readonly created_at: string;
-  readonly is_active: boolean;
-  readonly profile: ProfileType | null;
-}
-
-/**
- * Profile data structure
- * @source extracted_nested_type
- * @group users
- */
-export interface ProfileType {
-  readonly bio: string;
-  readonly avatar: string;
+  id: number;
+  name: string;
+  email: string;
+  avatar?: string;
+  created_at: string;
 }
 ```
 
----
+## How to Define Types
 
-## 🔧 Environment Variables
-
-Customize paths without modifying config files:
-
-```bash
-# .env
-TYPES_GENERATOR_OUTPUT_PATH="/custom/output/path"
-TYPES_GENERATOR_FILENAME_PATTERN="{group}.types.ts"
-TYPES_GENERATOR_RESOURCES_PATH="/app/Http/Resources"
-TYPES_GENERATOR_CONTROLLERS_PATH="/app/Http/Controllers"
+### Basic Types
+```php
+[
+    'title' => 'string',
+    'count' => 'number', 
+    'active' => 'boolean',
+    'data' => 'any',        // Use sparingly
+]
 ```
 
----
-
-## 📋 Requirements
-
-- **PHP**: 8.2+
-- **Laravel**: 11.0+ | 12.0+
-- **Dependencies**: 
-  - `nikic/php-parser` for AST analysis
-  - Laravel's core packages
-
----
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-./run-tests.sh
-
-# Run specific test suites
-./run-tests.sh --unit
-./run-tests.sh --feature
-
-# Generate coverage report
-./run-tests.sh --coverage
+### Optional Fields
+For fields that might not be present:
+```php
+[
+    'bio' => ['type' => 'string', 'optional' => true],  // bio?: string
+]
 ```
 
----
+### Nullable Fields
+For fields that can be null:
+```php
+[
+    'deleted_at' => ['type' => 'string', 'nullable' => true],  // deleted_at: string | null
+]
+```
 
-## 📝 License
+### Arrays
+```php
+[
+    'tags' => 'string[]',     // Array of strings
+    'users' => 'User[]',      // Array of User interfaces
+]
+```
 
-This package is open-sourced software licensed under the [MIT license](LICENSE).
+### Union Types
+```php
+[
+    'status' => 'string|null',  // status: string | null
+]
+```
 
----
+## Real Example: Blog Post API
 
-## 🤝 Contributing
+Here's how I handle a typical blog post resource:
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+```php
+class PostResource extends JsonResource
+{
+    #[GenerateTypes(
+        name: 'Post',
+        structure: [
+            'id' => 'number',
+            'title' => 'string',
+            'slug' => 'string',
+            'content' => 'string',
+            'excerpt' => ['type' => 'string', 'nullable' => true],
+            'published' => 'boolean',
+            'author' => 'Author',
+            'tags' => 'string[]',
+            'created_at' => 'string',
+            'updated_at' => 'string',
+        ],
+        types: [
+            'Author' => [
+                'id' => 'number',
+                'name' => 'string',
+                'email' => 'string',
+                'avatar' => ['type' => 'string', 'optional' => true],
+            ]
+        ]
+    )]
+    public function toArray($request): array
+    {
+        return [
+            'id' => $this->id,
+            'title' => $this->title,
+            'slug' => $this->slug,
+            'content' => $this->content,
+            'excerpt' => $this->excerpt,
+            'published' => $this->published,
+            'author' => [
+                'id' => $this->user->id,
+                'name' => $this->user->name,
+                'email' => $this->user->email,
+                'avatar' => $this->user->avatar,
+            ],
+            'tags' => $this->tags->pluck('name')->toArray(),
+            'created_at' => $this->created_at->toISOString(),
+            'updated_at' => $this->updated_at->toISOString(),
+        ];
+    }
+}
+```
 
----
+This generates two clean interfaces:
 
-<div align="center">
-<strong>Made with ❤️ by <a href="https://codemystify.com">CodeMystify</a></strong>
-</div>
+```typescript
+// post.ts
+import type { Author } from './author';
+
+export interface Post {
+  id: number;
+  title: string;
+  slug: string;
+  content: string;
+  excerpt: string | null;
+  published: boolean;
+  author: Author;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Author {
+  id: number;
+  name: string;
+  email: string;
+  avatar?: string;
+}
+```
+
+## Commands
+
+### Generate Types
+```bash
+php artisan types:generate
+```
+
+### Preview Without Writing Files
+```bash
+php artisan types:generate --dry-run
+```
+
+### Generate Specific Group
+```bash
+php artisan types:generate --group=api
+```
+
+## Using Groups
+
+I organize my types with groups:
+
+```php
+#[GenerateTypes(
+    name: 'AdminUser',
+    structure: [...],
+    group: 'admin'
+)]
+
+#[GenerateTypes(
+    name: 'PublicPost',
+    structure: [...],
+    group: 'public'
+)]
+```
+
+Then generate specific groups:
+```bash
+php artisan types:generate --group=admin
+```
+
+## File Organization
+
+All generated files go to `resources/js/types/generated/` by default:
+
+```
+resources/js/types/generated/
+├── index.ts          # Exports everything
+├── user.ts
+├── post.ts
+├── admin-user.ts
+└── ...
+```
+
+The `index.ts` file automatically exports everything:
+```typescript
+export * from './user';
+export * from './post';
+export * from './admin-user';
+```
+
+So in your React/Vue components:
+```typescript
+import { User, Post } from '@/types/generated';
+```
+
+## Configuration
+
+The defaults work fine, but you can customize:
+
+```php
+// config/types-generator.php
+return [
+    'sources' => [
+        'app/Http/Resources',
+        'app/Http/Controllers',
+        'app/Models',
+    ],
+
+    'output' => [
+        'base_path' => 'resources/js/types/generated',
+    ],
+
+    'files' => [
+        'extension' => 'ts',
+        'naming_pattern' => 'kebab-case',
+        'add_header_comment' => true,
+    ],
+];
+```
+
+## Practical Tips
+
+### 1. Start Simple
+Don't try to define everything at once. Start with basic types and add complexity as needed.
+
+### 2. Mirror Your API Exactly
+The structure should match exactly what your API returns. Don't overthink it.
+
+### 3. Use Optional vs Nullable Correctly
+- `optional: true` - field might not exist in the response
+- `nullable: true` - field exists but can be null
+
+### 4. Handle Pagination
+```php
+#[GenerateTypes(
+    name: 'PaginatedPosts',
+    structure: [
+        'data' => 'Post[]',
+        'meta' => 'PaginationMeta',
+    ],
+    types: [
+        'PaginationMeta' => [
+            'current_page' => 'number',
+            'last_page' => 'number',
+            'per_page' => 'number',
+            'total' => 'number',
+        ]
+    ]
+)]
+```
+
+### 5. Keep It DRY with Shared Types
+Define common types once and reuse them:
+
+```php
+// In a base resource or dedicated class
+'address' => 'Address',
+
+types: [
+    'Address' => [
+        'street' => 'string',
+        'city' => 'string',
+        'country' => 'string',
+        'postal_code' => 'string',
+    ]
+]
+```
+
+## Why I Built This
+
+I tried other solutions but they were either:
+- Too magic (trying to guess types from code)
+- Too complicated (requiring tons of configuration)
+- Too unreliable (breaking when Laravel code changed)
+
+This approach is explicit and predictable. You define exactly what you want, and you get exactly that. No surprises.
+
+## Troubleshooting
+
+### Types not generating?
+- Make sure you're using the attribute in classes that the scanner can find
+- Check that your `sources` config includes the right directories
+- Run with `--dry-run` to see what would be generated
+
+### Import errors in TypeScript?
+- The generator creates proper import statements automatically
+- Make sure you're importing from the right path
+- Check that the `index.ts` file was generated
+
+### Want to disable the package in production?
+The attributes have no runtime impact, but if you want to remove them:
+```bash
+php artisan types:cleanup --remove-attributes
+```
+
+That's it! Simple, predictable TypeScript type generation for Laravel. No magic, just the types you define.

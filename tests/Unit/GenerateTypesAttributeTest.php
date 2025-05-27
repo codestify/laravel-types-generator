@@ -7,29 +7,29 @@ describe('GenerateTypes Attribute', function () {
         $attribute = new GenerateTypes(name: 'TestType');
 
         expect($attribute->name)->toBe('TestType')
-            ->and($attribute->export)->toBeTrue()
+            ->and($attribute->structure)->toBe([])
+            ->and($attribute->types)->toBe([])
             ->and($attribute->group)->toBeNull()
-            ->and($attribute->options)->toBe([])
-            ->and($attribute->recursive)->toBeTrue()
-            ->and($attribute->description)->toBeNull();
+            ->and($attribute->fileType)->toBeNull()
+            ->and($attribute->export)->toBeTrue();
     });
 
     it('can be instantiated with all parameters', function () {
         $attribute = new GenerateTypes(
             name: 'ComplexType',
-            export: false,
+            structure: ['id' => 'string', 'name' => 'string'],
+            types: ['User' => ['id' => 'string']],
             group: 'events',
-            options: ['include_relations' => true],
-            recursive: false,
-            description: 'A complex type definition'
+            fileType: 'resource',
+            export: false
         );
 
         expect($attribute->name)->toBe('ComplexType')
-            ->and($attribute->export)->toBeFalse()
+            ->and($attribute->structure)->toBe(['id' => 'string', 'name' => 'string'])
+            ->and($attribute->types)->toBe(['User' => ['id' => 'string']])
             ->and($attribute->group)->toBe('events')
-            ->and($attribute->options)->toBe(['include_relations' => true])
-            ->and($attribute->recursive)->toBeFalse()
-            ->and($attribute->description)->toBe('A complex type definition');
+            ->and($attribute->fileType)->toBe('resource')
+            ->and($attribute->export)->toBeFalse();
     });
 
     it('has correct attribute target configuration', function () {
@@ -37,13 +37,17 @@ describe('GenerateTypes Attribute', function () {
         $attributes = $reflection->getAttributes();
 
         expect($attributes)->toHaveCount(1);
+
+        $reflectionAttribute = $attributes[0];
+        expect($reflectionAttribute->getName())->toBe(Attribute::class);
     });
 
-    it('can validate attribute properties', function () {
+    it('validates attribute properties', function () {
         $attribute = new GenerateTypes(name: 'ValidationType');
 
         expect($attribute->name)->toBeString()
             ->and($attribute->export)->toBeBool()
-            ->and($attribute->recursive)->toBeBool();
+            ->and($attribute->structure)->toBeArray()
+            ->and($attribute->types)->toBeArray();
     });
 });

@@ -9,10 +9,10 @@ class GenerateTypes
 {
     public function __construct(
         public readonly string $name,
-        public readonly bool $export = true,
+        public readonly array $structure = [],
+        public readonly array $types = [],
         public readonly ?string $group = null,
-        public readonly array $options = [],
-        public readonly bool $recursive = true,
-        public readonly ?string $description = null
+        public readonly ?string $fileType = null,
+        public readonly bool $export = true,
     ) {}
 }

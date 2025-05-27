@@ -1,6 +1,6 @@
 {
     "name": "codemystify/laravel-types-generator",
-    "description": "Enterprise-grade TypeScript types generator for Laravel applications with advanced error handling and performance optimization",
+    "description": "Simplified TypeScript types generator for Laravel applications with developer-defined structure system",
     "type": "library",
     "license": "MIT",
     "keywords": [
@@ -35,10 +35,9 @@
     "prefer-stable": true,
     "require": {
         "php": "^8.2|^8.3",
-        "illuminate/support": "^11.0|^12.0",
         "illuminate/console": "^11.0|^12.0",
         "illuminate/filesystem": "^11.0|^12.0",
-        "nikic/php-parser": "^4.15|^5.0"
+        "illuminate/support": "^11.0|^12.0"
     },
     "require-dev": {
         "phpunit/phpunit": "^10.0|^11.0",
@@ -73,7 +72,6 @@
         "test:coverage-html": "pest --coverage --coverage-html=coverage",
         "format": "pint",
         "format:test": "pint --test",
-        "analyse": "phpstan analyse",
         "quality": [
             "@format:test",
             "@test"

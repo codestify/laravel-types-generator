@@ -1,18 +1,27 @@
 <?php
 
-test('package can be instantiated', function () {
-    expect(true)->toBeTrue();
-});
+describe('Basic Package Test', function () {
+    it('package services can be instantiated', function () {
+        expect(app(\Codemystify\TypesGenerator\Services\FileTypeDetector::class))
+            ->toBeInstanceOf(\Codemystify\TypesGenerator\Services\FileTypeDetector::class);
 
-test('helper functions work', function () {
-    $event = createMockEvent();
-    expect($event->id)->toBe(1)
-        ->and($event->title)->toBe('Sample Event');
-});
+        expect(app(\Codemystify\TypesGenerator\Services\StructureParser::class))
+            ->toBeInstanceOf(\Codemystify\TypesGenerator\Services\StructureParser::class);
 
-test('can create complex mock data', function () {
-    $data = createComplexMockData();
-    expect($data->id)->toBe(1)
-        ->and($data->nested_object->sub_id)->toBe(2)
-        ->and($data->array_field)->toBeArray();
+        expect(app(\Codemystify\TypesGenerator\Services\TypeScriptGenerator::class))
+            ->toBeInstanceOf(\Codemystify\TypesGenerator\Services\TypeScriptGenerator::class);
+
+        expect(app(\Codemystify\TypesGenerator\Services\SimpleTypeGeneratorService::class))
+            ->toBeInstanceOf(\Codemystify\TypesGenerator\Services\SimpleTypeGeneratorService::class);
+    });
+
+    it('attribute works correctly', function () {
+        $attribute = new \Codemystify\TypesGenerator\Attributes\GenerateTypes(
+            name: 'TestType',
+            structure: ['id' => 'string'],
+        );
+
+        expect($attribute->name)->toBe('TestType')
+            ->and($attribute->structure)->toBe(['id' => 'string']);
+    });
 });
