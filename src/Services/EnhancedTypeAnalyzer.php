@@ -465,51 +465,29 @@ class EnhancedTypeAnalyzer
     }
 
     /**
-     * Analyze specific protected methods for better type inference
+     * Analyze protected methods using generic Laravel patterns only
      */
     public function analyzeProtectedMethod(string $methodName, ReflectionClass $resourceClass): array
     {
-        return match ($methodName) {
-            'calculateStats' => [
+        $lowerMethodName = strtolower($methodName);
+
+        // Use generic Laravel naming patterns only - NO hardcoded structures
+        return match (true) {
+            // Methods ending with 'Stats' typically return objects with numeric data
+            str_ends_with($lowerMethodName, 'stats') => [
                 'type' => 'object',
-                'structure' => [
-                    'soldTickets' => ['type' => 'number'],
-                    'checkInsToday' => ['type' => 'number'],
-                    'conversionRate' => ['type' => 'number'],
-                    'totalRevenue' => ['type' => 'number'],
-                ],
+                'structure' => [], // Let AST analysis determine actual structure
             ],
-            'getTicketTypesWithSales' => [
+            // Methods starting with 'get' and ending with 's' typically return arrays (but not ending in 'ss')
+            str_starts_with($lowerMethodName, 'get') && str_ends_with($lowerMethodName, 's') && ! str_ends_with($lowerMethodName, 'ss') => [
                 'type' => 'array',
-                'items' => [
-                    'type' => 'object',
-                    'structure' => [
-                        'id' => ['type' => 'number'],
-                        'name' => ['type' => 'string'],
-                        'price' => ['type' => 'number'],
-                        'quantity' => ['type' => 'number'],
-                        'sold' => ['type' => 'number'],
-                    ],
-                ],
+                'items' => ['type' => 'object'],
             ],
-            'getRecentActivity' => [
-                'type' => 'array',
-                'items' => [
-                    'type' => 'object',
-                    'structure' => [
-                        'id' => ['type' => 'number'],
-                        'description' => ['type' => 'string'],
-                        'created_at' => ['type' => 'string'],
-                        'user' => [
-                            'type' => 'object',
-                            'structure' => [
-                                'name' => ['type' => 'string'],
-                                'email' => ['type' => 'string'],
-                            ],
-                        ],
-                    ],
-                ],
+            // Methods starting with 'get' typically return objects
+            str_starts_with($lowerMethodName, 'get') => [
+                'type' => 'object',
             ],
+            // Default: delegate to AST analysis
             default => ['type' => 'unknown']
         };
     }
@@ -517,17 +495,43 @@ class EnhancedTypeAnalyzer
     public function getBasicPropertyType(string $property): array
     {
         return match ($property) {
+            // Primary identifiers
             'id' => ['type' => 'number'],
+            'uuid' => ['type' => 'string'],
             'ulid' => ['type' => 'string'],
-            'title', 'name', 'description', 'venue_name', 'organizer_name' => ['type' => 'string'],
-            'start_date', 'end_date' => ['type' => 'string', 'description' => 'ISO date string'],
-            'start_time' => ['type' => 'string', 'description' => 'Formatted time'],
-            'formatted_address' => ['type' => 'string', 'nullable' => true],
-            'is_active', 'is_featured' => ['type' => 'boolean'],
-            'price', 'total_amount' => ['type' => 'number'],
 
-            // Category relationships - common patterns
-            'category', 'event_category', 'eventCategory' => [
+            // Common string fields
+            'title', 'name', 'description', 'slug', 'email', 'phone' => ['type' => 'string'],
+
+            // Date/time fields
+            'created_at', 'updated_at', 'deleted_at' => ['type' => 'string', 'description' => 'ISO date string'],
+
+            // Nullable address fields
+            'address', 'formatted_address' => ['type' => 'string', 'nullable' => true],
+
+            // Boolean flags
+            'is_active', 'is_featured', 'is_verified', 'is_published' => ['type' => 'boolean'],
+
+            // Numeric fields
+            'price', 'amount', 'total', 'count', 'quantity' => ['type' => 'number'],
+
+            // Status and visibility enums
+            'status', 'visibility', 'type' => ['type' => 'string', 'description' => 'Enum value'],
+
+            default => $this->inferFromPropertyPattern($property)
+        };
+    }
+
+    /**
+     * Infer property type from naming patterns
+     */
+    private function inferFromPropertyPattern(string $property): array
+    {
+        $lowerProperty = strtolower($property);
+
+        // Pattern-based inference
+        if (str_contains($lowerProperty, 'category')) {
+            return [
                 'type' => 'object',
                 'nullable' => true,
                 'structure' => [
@@ -535,23 +539,36 @@ class EnhancedTypeAnalyzer
                     'name' => ['type' => 'string'],
                     'slug' => ['type' => 'string'],
                 ],
-            ],
+            ];
+        }
 
-            // Image/Media fields
-            'cover_image', 'coverImage', 'image', 'avatar', 'banner', 'logo' => [
+        if (str_contains($lowerProperty, 'image') || str_contains($lowerProperty, 'avatar') ||
+            str_contains($lowerProperty, 'banner') || str_contains($lowerProperty, 'logo')) {
+            return [
                 'type' => 'object',
                 'nullable' => true,
                 'structure' => [
                     'url' => ['type' => 'string'],
                     'alt_text' => ['type' => 'string', 'nullable' => true],
                 ],
-            ],
+            ];
+        }
 
-            // Status and visibility enums
-            'status', 'visibility' => ['type' => 'string', 'description' => 'Enum value'],
+        if (str_contains($lowerProperty, 'date') || str_contains($lowerProperty, 'time')) {
+            return ['type' => 'string', 'description' => 'Date/time string'];
+        }
 
-            default => ['type' => 'string', 'nullable' => true] // Default fallback for unknown properties
-        };
+        if (str_contains($lowerProperty, 'is_') || str_contains($lowerProperty, 'has_')) {
+            return ['type' => 'boolean'];
+        }
+
+        if (str_contains($lowerProperty, 'count') || str_contains($lowerProperty, 'amount') ||
+            str_contains($lowerProperty, 'price') || str_contains($lowerProperty, 'total')) {
+            return ['type' => 'number'];
+        }
+
+        // Default fallback
+        return ['type' => 'string', 'nullable' => true];
     }
 
     /**
@@ -559,42 +576,52 @@ class EnhancedTypeAnalyzer
      */
     public function analyzeTraitMethod(string $methodName, ReflectionClass $resourceClass): array
     {
-        return match ($methodName) {
-            'getFormattedAddress' => ['type' => 'string', 'nullable' => true],
-            'getManageEventData' => [
+        // Generic pattern-based analysis instead of hardcoded method names
+        return match (true) {
+            str_contains(strtolower($methodName), 'address') => ['type' => 'string', 'nullable' => true],
+            str_contains(strtolower($methodName), 'formatted') => ['type' => 'string', 'nullable' => true],
+            str_contains(strtolower($methodName), 'data') && str_contains(strtolower($methodName), 'manage') => [
                 'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'string'],
-                    'title' => ['type' => 'string'],
-                    'description' => ['type' => 'string'],
-                    'start_date' => ['type' => 'string', 'description' => 'ISO date string'],
-                    'start_time' => ['type' => 'string', 'description' => 'Formatted time'],
-                    'venue_name' => ['type' => 'string'],
-                    'visibility' => ['type' => 'string', 'description' => 'Enum value'],
-                    'formatted_address' => ['type' => 'string', 'nullable' => true],
-                    'status' => ['type' => 'string', 'description' => 'Enum value'],
-                    'organizer_name' => ['type' => 'string'],
-                    'organization_name' => ['type' => 'string'],
-                    'category' => [
-                        'type' => 'object',
-                        'nullable' => true,
-                        'structure' => [
-                            'id' => ['type' => 'string'],
-                            'name' => ['type' => 'string'],
-                            'slug' => ['type' => 'string'],
-                        ],
-                    ],
-                    'cover_image' => [
-                        'type' => 'object',
-                        'nullable' => true,
-                        'structure' => [
-                            'url' => ['type' => 'string'],
-                            'alt_text' => ['type' => 'string', 'nullable' => true],
-                        ],
-                    ],
-                ],
+                'structure' => $this->inferManageDataStructure($resourceClass),
+            ],
+            str_contains(strtolower($methodName), 'stats') => [
+                'type' => 'object',
+                'structure' => $this->inferStatsStructure(),
+            ],
+            str_contains(strtolower($methodName), 'timeline') => [
+                'type' => 'array',
+                'items' => ['type' => 'object'],
             ],
             default => ['type' => 'unknown']
         };
+    }
+
+    /**
+     * Infer generic manage data structure based on common Laravel patterns
+     */
+    private function inferManageDataStructure(ReflectionClass $resourceClass): array
+    {
+        return [
+            'id' => ['type' => 'string'],
+            'title' => ['type' => 'string'],
+            'name' => ['type' => 'string'],
+            'description' => ['type' => 'string', 'nullable' => true],
+            'status' => ['type' => 'string'],
+            'created_at' => ['type' => 'string'],
+            'updated_at' => ['type' => 'string'],
+        ];
+    }
+
+    /**
+     * Infer generic stats structure
+     */
+    private function inferStatsStructure(): array
+    {
+        return [
+            'total' => ['type' => 'number'],
+            'count' => ['type' => 'number'],
+            'percentage' => ['type' => 'number'],
+            'amount' => ['type' => 'number'],
+        ];
     }
 }

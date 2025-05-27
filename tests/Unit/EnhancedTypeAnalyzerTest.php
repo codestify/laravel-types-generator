@@ -28,12 +28,23 @@ describe('EnhancedTypeAnalyzer', function () {
     it('can analyze protected method patterns', function () {
         $reflection = new ReflectionClass('stdClass'); // Use stdClass as mock
 
+        // Test methods ending with 'Stats' - should return object with empty structure
         $result = $this->analyzer->analyzeProtectedMethod('calculateStats', $reflection);
-
         expect($result['type'])->toBe('object');
-        expect($result['structure'])->toHaveKey('soldTickets');
-        expect($result['structure'])->toHaveKey('totalRevenue');
-        expect($result['structure']['soldTickets']['type'])->toBe('number');
+        expect($result['structure'])->toBe([]); // Generic pattern - no hardcoded fields
+
+        // Test methods starting with 'get' and ending with 's' - should return array
+        $result = $this->analyzer->analyzeProtectedMethod('getItems', $reflection);
+        expect($result['type'])->toBe('array');
+        expect($result['items']['type'])->toBe('object');
+
+        // Test methods starting with 'get' - should return object
+        $result = $this->analyzer->analyzeProtectedMethod('getData', $reflection);
+        expect($result['type'])->toBe('object');
+
+        // Test unknown method - should return unknown
+        $result = $this->analyzer->analyzeProtectedMethod('unknownMethod', $reflection);
+        expect($result['type'])->toBe('unknown');
     });
 
     it('can infer property types for common Laravel patterns', function () {

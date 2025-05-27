@@ -76,7 +76,7 @@ class ComplexExpressionAnalyzer
 
         foreach ($returnNodes as $returnNode) {
             if ($returnNode->expr) {
-                // Handle simple property access like $this->organization->name
+                // Handle simple property access like $this->relation->property
                 if ($this->isSimplePropertyAccess($returnNode->expr)) {
                     return ['type' => 'string', 'nullable' => true];
                 }
@@ -85,23 +85,102 @@ class ComplexExpressionAnalyzer
                 if ($returnNode->expr instanceof Node\Expr\Array_) {
                     return $this->analyzeArrayInClosure($returnNode->expr, $relationName, $class);
                 }
+
+                // Handle method calls that might return arrays or objects
+                if ($returnNode->expr instanceof Node\Expr\MethodCall) {
+                    return $this->analyzeMethodCallReturn($returnNode->expr, $relationName, $class);
+                }
             }
         }
 
-        return $this->typeAnalyzer->inferRelationshipType($relationName, $class);
+        // Enhanced fallback - try to infer from relation name patterns
+        return $this->inferFromRelationNamePattern($relationName);
     }
 
     /**
-     * Analyze specific private methods for better type inference
+     * Analyze method call returns in whenLoaded closures
+     */
+    private function analyzeMethodCallReturn(Node\Expr\MethodCall $methodCall, string $relationName, ReflectionClass $class): array
+    {
+        // Handle common Laravel collection methods that return arrays
+        if ($methodCall->name instanceof Node\Identifier) {
+            $methodName = $methodCall->name->toString();
+
+            return match ($methodName) {
+                'toArray' => ['type' => 'object', 'nullable' => true],
+                'first' => ['type' => 'object', 'nullable' => true],
+                'get' => ['type' => 'array', 'items' => ['type' => 'object']],
+                default => ['type' => 'unknown']
+            };
+        }
+
+        return ['type' => 'unknown'];
+    }
+
+    /**
+     * Infer type from relation name patterns when AST analysis fails
+     */
+    private function inferFromRelationNamePattern(string $relationName): array
+    {
+        // Common relationship patterns to object structures
+        if (str_contains($relationName, 'Category') || str_contains($relationName, 'category')) {
+            return [
+                'type' => 'object',
+                'nullable' => true,
+                'structure' => [
+                    'id' => ['type' => 'string'],
+                    'name' => ['type' => 'string'],
+                    'slug' => ['type' => 'string'],
+                ],
+            ];
+        }
+
+        if (str_contains($relationName, 'Image') || str_contains($relationName, 'image')) {
+            return [
+                'type' => 'object',
+                'nullable' => true,
+                'structure' => [
+                    'url' => ['type' => 'string'],
+                    'alt_text' => ['type' => 'string', 'nullable' => true],
+                ],
+            ];
+        }
+
+        // Default object structure
+        return [
+            'type' => 'object',
+            'nullable' => true,
+            'structure' => [
+                'id' => ['type' => 'string'],
+                'name' => ['type' => 'string'],
+            ],
+        ];
+    }
+
+    /**
+     * Analyze private methods using generic Laravel patterns only - NO hardcoded assumptions
      */
     public function analyzePrivateMethod(ReflectionMethod $method, ReflectionClass $class): array
     {
-        $methodName = $method->getName();
+        $methodName = strtolower($method->getName());
 
-        return match ($methodName) {
-            'calculateStats' => $this->analyzeCalculateStatsMethod($method, $class),
-            'getTicketTypesWithSales' => $this->analyzeTicketTypesMethod($method, $class),
-            'getRecentActivity' => $this->analyzeRecentActivityMethod($method, $class),
+        // Use generic Laravel naming patterns only - NO domain-specific assumptions
+        return match (true) {
+            // Methods ending with 'Stats' typically return objects
+            str_ends_with($methodName, 'stats') => [
+                'type' => 'object',
+                'structure' => [], // Let AST analysis determine actual structure
+            ],
+            // Methods starting with 'get' and ending with 's' typically return arrays
+            str_starts_with($methodName, 'get') && str_ends_with($methodName, 's') => [
+                'type' => 'array',
+                'items' => ['type' => 'object'],
+            ],
+            // Methods starting with 'get' typically return objects
+            str_starts_with($methodName, 'get') => [
+                'type' => 'object',
+            ],
+            // Default: delegate to AST analysis
             default => ['type' => 'unknown']
         };
     }
@@ -183,23 +262,8 @@ class ComplexExpressionAnalyzer
                 $key = $this->getStringValue($item->key);
 
                 if ($key) {
-                    // Enhanced analysis for specific relation patterns
-                    if ($relationName === 'eventCategory') {
-                        $structure[$key] = match ($key) {
-                            'id' => ['type' => 'string', 'description' => 'Category ULID'],
-                            'name' => ['type' => 'string'],
-                            'slug' => ['type' => 'string'],
-                            default => $this->inferRelationPropertyType($key, $relationName)
-                        };
-                    } elseif ($relationName === 'images') {
-                        $structure[$key] = match ($key) {
-                            'url' => ['type' => 'string', 'description' => 'Image URL'],
-                            'alt_text' => ['type' => 'string', 'nullable' => true],
-                            default => $this->inferRelationPropertyType($key, $relationName)
-                        };
-                    } else {
-                        $structure[$key] = $this->inferRelationPropertyType($key, $relationName);
-                    }
+                    // Enhanced analysis - analyze the actual value expression to determine type
+                    $structure[$key] = $this->analyzeArrayValueExpression($item->value, $relationName);
                 }
             }
         }
@@ -212,64 +276,119 @@ class ComplexExpressionAnalyzer
     }
 
     /**
-     * Analyze calculateStats method specifically
+     * Analyze array value expressions generically to determine TypeScript type
      */
-    private function analyzeCalculateStatsMethod(ReflectionMethod $method, ReflectionClass $class): array
+    private function analyzeArrayValueExpression(Node\Expr $valueExpr, string $relationName): array
     {
-        return [
-            'type' => 'object',
-            'structure' => [
-                'soldTickets' => ['type' => 'number'],
-                'checkInsToday' => ['type' => 'number'],
-                'conversionRate' => ['type' => 'number'],
-                'totalRevenue' => ['type' => 'number'],
-            ],
-        ];
+        // Property access like $this->relation->id
+        if ($valueExpr instanceof PropertyFetch) {
+            return $this->analyzePropertyFetchExpression($valueExpr);
+        }
+
+        // Method call like $this->relation->getName()
+        if ($valueExpr instanceof MethodCall) {
+            return $this->analyzeMethodCallExpression($valueExpr);
+        }
+
+        // Ternary operator like $this->images->first()?->path ?? asset('...')
+        if ($valueExpr instanceof Node\Expr\Ternary || $valueExpr instanceof Node\Expr\BinaryOp\Coalesce) {
+            return $this->analyzeTernaryOrNullCoalesceExpression($valueExpr);
+        }
+
+        // Array literal like ['item1', 'item2']
+        if ($valueExpr instanceof Node\Expr\Array_) {
+            return ['type' => 'array', 'items' => ['type' => 'string']];
+        }
+
+        // String literal like 'value'
+        if ($valueExpr instanceof Node\Scalar\String_) {
+            return ['type' => 'string'];
+        }
+
+        // Number literal like 123
+        if ($valueExpr instanceof Node\Scalar\LNumber || $valueExpr instanceof Node\Scalar\DNumber) {
+            return ['type' => 'number'];
+        }
+
+        // Boolean literal like true/false
+        if ($valueExpr instanceof Node\Expr\ConstFetch) {
+            $constName = strtolower($valueExpr->name->toString());
+            if (in_array($constName, ['true', 'false'])) {
+                return ['type' => 'boolean'];
+            }
+        }
+
+        // Function calls like asset()
+        if ($valueExpr instanceof Node\Expr\FuncCall && $valueExpr->name instanceof Node\Name) {
+            $funcName = $valueExpr->name->toString();
+            if ($funcName === 'asset') {
+                return ['type' => 'string', 'description' => 'Asset URL'];
+            }
+        }
+
+        // Fallback to relationship property inference
+        return $this->inferRelationPropertyType('unknown', $relationName);
     }
 
     /**
-     * Analyze getTicketTypesWithSales method
+     * Analyze property fetch expressions like $this->relation->property
      */
-    private function analyzeTicketTypesMethod(ReflectionMethod $method, ReflectionClass $class): array
+    private function analyzePropertyFetchExpression(PropertyFetch $propertyFetch): array
     {
-        return [
-            'type' => 'array',
-            'items' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'name' => ['type' => 'string'],
-                    'price' => ['type' => 'number'],
-                    'quantity' => ['type' => 'number'],
-                    'sold' => ['type' => 'number'],
-                ],
-            ],
-        ];
+        // Get the property name being accessed
+        $propertyName = $propertyFetch->name instanceof Node\Identifier
+            ? $propertyFetch->name->toString()
+            : 'unknown';
+
+        // Common property name patterns
+        // Use basic type inference based on minimal patterns only
+        return match (true) {
+            str_contains($propertyName, 'id') || str_contains($propertyName, 'ulid') => ['type' => 'string'],
+            str_starts_with($propertyName, 'is_') || str_starts_with($propertyName, 'has_') => ['type' => 'boolean'],
+            default => ['type' => 'string'], // Safe default
+        };
     }
 
     /**
-     * Analyze getRecentActivity method
+     * Analyze method call expressions like $this->relation->getValue()
      */
-    private function analyzeRecentActivityMethod(ReflectionMethod $method, ReflectionClass $class): array
+    private function analyzeMethodCallExpression(MethodCall $methodCall): array
     {
-        return [
-            'type' => 'array',
-            'items' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'description' => ['type' => 'string'],
-                    'created_at' => ['type' => 'string'],
-                    'user' => [
-                        'type' => 'object',
-                        'structure' => [
-                            'name' => ['type' => 'string'],
-                            'email' => ['type' => 'string'],
-                        ],
-                    ],
-                ],
-            ],
-        ];
+        $methodName = $methodCall->name instanceof Node\Identifier
+            ? $methodCall->name->toString()
+            : 'unknown';
+
+        return match ($methodName) {
+            'toArray' => ['type' => 'array'],
+            'toJson' => ['type' => 'string'],
+            default => ['type' => 'string'], // Safe default
+        };
+    }
+
+    /**
+     * Analyze ternary or null coalesce expressions
+     */
+    private function analyzeTernaryOrNullCoalesceExpression(Node\Expr $expr): array
+    {
+        // These expressions can return null, so mark as nullable
+        if ($expr instanceof Node\Expr\Ternary) {
+            // Analyze the true branch for type
+            if ($expr->if) {
+                $type = $this->analyzeArrayValueExpression($expr->if, '');
+            } else {
+                $type = $this->analyzeArrayValueExpression($expr->else, '');
+            }
+        } elseif ($expr instanceof Node\Expr\BinaryOp\Coalesce) {
+            // Analyze the left side for primary type
+            $type = $this->analyzeArrayValueExpression($expr->left, '');
+        } else {
+            $type = ['type' => 'string'];
+        }
+
+        // Mark as nullable since these operators handle null cases
+        $type['nullable'] = true;
+
+        return $type;
     }
 
     /**

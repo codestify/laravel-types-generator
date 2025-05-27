@@ -479,45 +479,30 @@ class SimpleReflectionAnalyzer
             return ['type' => 'string', 'nullable' => true];
         }
 
-        // Pattern 2: Common Laravel enum field names (domain-agnostic)
-        if (in_array($property, ['status', 'visibility', 'type', 'state', 'role', 'level', 'priority'])) {
-            return ['type' => 'string', 'description' => 'Enum value'];
-        }
-
-        // Pattern 3: Date/timestamp fields - common Carbon method results
-        if (in_array($property, ['start', 'end']) || str_contains($property, 'timestamp')) {
-            return ['type' => 'number', 'description' => 'Timestamp (valueOf() result)'];
-        }
-
-        // Pattern 4: Generic relationship detection
-        if ($this->looksLikeRelationshipProperty($property)) {
-            return $this->inferRelationshipStructure($property);
-        }
-
-        // Pattern 5: Boolean patterns (Laravel accessor conventions)
+        // Pattern 2: Boolean patterns (Laravel accessor conventions)
         if (str_starts_with($property, 'is_') || str_starts_with($property, 'has_') || str_starts_with($property, 'can_')) {
             return ['type' => 'boolean'];
         }
 
-        // Pattern 6: Date/time patterns (Laravel convention)
+        // Pattern 3: Date/time patterns (Laravel convention)
         if (str_contains($property, 'date') || str_contains($property, 'time') ||
             in_array($property, ['created_at', 'updated_at', 'deleted_at'])) {
             return ['type' => 'string', 'description' => 'Date/time string'];
         }
 
-        // Pattern 7: ID fields (Laravel convention)
+        // Pattern 4: ID fields (Laravel convention)
         if ($property === 'id' || str_ends_with($property, '_id')) {
             return ['type' => 'string']; // Support for ULIDs/UUIDs
         }
 
-        // Pattern 8: Numeric fields (common patterns across domains)
-        if (in_array($property, ['latitude', 'longitude', 'amount', 'price', 'cost', 'total', 'count', 'quantity'])) {
-            return ['type' => 'number'];
-        }
-
-        // Pattern 9: URL/path fields (common web app patterns)
+        // Pattern 5: URL/path fields (common web app patterns)
         if (str_contains($property, 'url') || str_contains($property, 'path') || str_contains($property, 'link')) {
             return ['type' => 'string'];
+        }
+
+        // Pattern 6: Generic relationship detection
+        if ($this->looksLikeRelationshipProperty($property)) {
+            return $this->inferRelationshipStructure($property);
         }
 
         // Default fallback - safe for any domain

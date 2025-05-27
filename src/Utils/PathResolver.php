@@ -4,8 +4,10 @@ namespace Codemystify\TypesGenerator\Utils;
 
 class PathResolver
 {
+    private static ?string $projectRoot = null;
+
     /**
-     * Resolve a path relative to Laravel's base path
+     * Resolve a path relative to project root
      */
     public static function resolve(string $path): string
     {
@@ -19,8 +21,73 @@ class PathResolver
             return self::resolveBasePath($path);
         }
 
-        // Otherwise, resolve relative to base path
-        return base_path($path);
+        // Otherwise, resolve relative to detected project root
+        return self::getProjectRoot().'/'.ltrim($path, '/\\');
+    }
+
+    /**
+     * Get project root directory
+     */
+    public static function getProjectRoot(): string
+    {
+        if (self::$projectRoot === null) {
+            self::$projectRoot = self::detectProjectRoot();
+        }
+
+        return self::$projectRoot;
+    }
+
+    /**
+     * Auto-detect project root directory
+     */
+    private static function detectProjectRoot(): string
+    {
+        // If Laravel function exists, use it
+        if (function_exists('base_path')) {
+            return base_path();
+        }
+
+        // Start from current directory and walk up
+        $currentDir = __DIR__;
+        $maxLevels = 10;
+
+        for ($i = 0; $i < $maxLevels; $i++) {
+            // Check for project indicators
+            if (self::isProjectRoot($currentDir)) {
+                return $currentDir;
+            }
+
+            $parent = dirname($currentDir);
+            if ($parent === $currentDir) {
+                break; // Reached root
+            }
+            $currentDir = $parent;
+        }
+
+        // Fallback: assume vendor package structure
+        return dirname(__DIR__, 4);
+    }
+
+    /**
+     * Check if directory contains project indicators
+     */
+    private static function isProjectRoot(string $dir): bool
+    {
+        $indicators = [
+            'composer.json',
+            'artisan',
+            'package.json',
+            '.git',
+            'bootstrap/app.php',
+        ];
+
+        foreach ($indicators as $indicator) {
+            if (file_exists($dir.'/'.$indicator)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -48,12 +115,12 @@ class PathResolver
     {
         // Extract the parameter from base_path('parameter')
         if (preg_match('/base_path\([\'"]([^\'"]*)[\'"]?\)/', $path, $matches)) {
-            return base_path($matches[1]);
+            return self::getProjectRoot().'/'.ltrim($matches[1], '/\\');
         }
 
         // base_path() without parameters
         if ($path === 'base_path()') {
-            return base_path();
+            return self::getProjectRoot();
         }
 
         return $path;
@@ -79,15 +146,5 @@ class PathResolver
         }
 
         return true;
-    }
-
-    /**
-     * Resolve environment variable patterns in paths
-     */
-    public static function resolveEnvVars(string $path): string
-    {
-        return preg_replace_callback('/\$\{([^}]+)\}/', function ($matches) {
-            return env($matches[1], '');
-        }, $path);
     }
 }

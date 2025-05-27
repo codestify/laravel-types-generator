@@ -31,7 +31,7 @@ class AstAnalyzer
     {
         // Handle both php-parser v4 and v5 compatibility
         $factory = new ParserFactory;
-        
+
         if (method_exists($factory, 'createForNewestSupportedVersion')) {
             // php-parser v5+
             $this->parser = $factory->createForNewestSupportedVersion();
@@ -39,7 +39,7 @@ class AstAnalyzer
             // php-parser v4 fallback
             $this->parser = $factory->create(ParserFactory::PREFER_PHP7);
         }
-        
+
         $this->nodeFinder = new NodeFinder;
         $this->typeAnalyzer = new EnhancedTypeAnalyzer(new MigrationAnalyzer);
         $this->complexAnalyzer = new ComplexExpressionAnalyzer($this->typeAnalyzer);
@@ -59,7 +59,7 @@ class AstAnalyzer
                 return $contextResult;
             }
 
-            // Fallback to basic AST analysis
+            // Try basic AST analysis as fallback
             $filename = $method->getFileName();
 
             // Skip if the file doesn't exist (e.g., eval'd code)
@@ -88,14 +88,21 @@ class AstAnalyzer
 
             foreach ($returnNodes as $returnNode) {
                 if ($returnNode->expr) {
-                    return $this->analyzeExpression($returnNode->expr, $method->getDeclaringClass());
+                    $result = $this->analyzeExpression($returnNode->expr, $method->getDeclaringClass());
+
+                    // If we get a valid result, return it
+                    if ($result['type'] !== 'unknown') {
+                        return $result;
+                    }
                 }
             }
 
-            return ['type' => 'unknown'];
+            // If AST analysis fails completely, try pattern-based inference for the method
+            return $this->inferMethodReturnType($method);
 
         } catch (Error $e) {
-            return ['type' => 'unknown', 'error' => $e->getMessage()];
+            // Try pattern-based inference as last resort
+            return $this->inferMethodReturnType($method);
         }
     }
 
@@ -181,6 +188,11 @@ class AstAnalyzer
             return $this->analyzeChainedMethodCall($methodCall, $class);
         }
 
+        // Handle complex method chains like Model::where()->get()->map()->toArray()
+        if ($this->isCollectionChain($methodCall)) {
+            return $this->analyzeCollectionChain($methodCall, $class);
+        }
+
         // Handle function calls like asset()
         if ($methodCall->name instanceof Node\Identifier) {
             $functionName = $methodCall->name->toString();
@@ -210,31 +222,11 @@ class AstAnalyzer
         if (count($args) >= 2 && $args[1]->value instanceof Node\Expr\Closure) {
             $closure = $args[1]->value;
 
-            // Special handling for known relationship patterns
-            if ($relationName === 'eventCategory') {
-                return [
-                    'type' => 'object',
-                    'nullable' => true,
-                    'structure' => [
-                        'id' => ['type' => 'string'],
-                        'name' => ['type' => 'string'],
-                        'slug' => ['type' => 'string'],
-                    ],
-                ];
+            // Try complex analysis first
+            $result = $this->complexAnalyzer->analyzeWhenLoadedClosure($closure, $relationName, $class);
+            if ($result['type'] !== 'unknown') {
+                return $result;
             }
-
-            if ($relationName === 'images') {
-                return [
-                    'type' => 'object',
-                    'nullable' => true,
-                    'structure' => [
-                        'url' => ['type' => 'string'],
-                        'alt_text' => ['type' => 'string', 'nullable' => true],
-                    ],
-                ];
-            }
-
-            return $this->complexAnalyzer->analyzeWhenLoadedClosure($closure, $relationName, $class);
         }
 
         // Use enhanced relationship analysis for fallback
@@ -275,7 +267,80 @@ class AstAnalyzer
             };
         }
 
+        // Handle method chains on method calls like $this->getItems()->toArray()
+        if ($methodCall->var instanceof MethodCall &&
+            is_string($methodCall->name->name ?? null)) {
+
+            $methodName = $methodCall->name->name;
+
+            if ($methodName === 'toArray') {
+                // Analyze the chained method call and convert to array
+                $baseResult = $this->analyzeMethodCall($methodCall->var, $class);
+
+                if ($baseResult['type'] === 'object' && isset($baseResult['structure'])) {
+                    // Convert object structure to array of objects
+                    return [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object',
+                            'structure' => $baseResult['structure'],
+                        ],
+                    ];
+                }
+
+                return ['type' => 'array'];
+            }
+        }
+
         return ['type' => 'string'];
+    }
+
+    /**
+     * Check if this is a Laravel collection method chain
+     */
+    private function isCollectionChain(MethodCall $methodCall): bool
+    {
+        // Check if the chain ends with toArray()
+        if (is_string($methodCall->name->name ?? null) && $methodCall->name->name === 'toArray') {
+            return true;
+        }
+
+        // Check if this is part of a chain that includes collection methods
+        $current = $methodCall;
+        while ($current instanceof MethodCall) {
+            $methodName = $current->name->name ?? null;
+            if (is_string($methodName) && in_array($methodName, ['get', 'map', 'filter', 'toArray', 'pluck', 'where'])) {
+                return true;
+            }
+            $current = $current->var instanceof MethodCall ? $current->var : null;
+        }
+
+        return false;
+    }
+
+    /**
+     * Analyze Laravel collection method chains
+     */
+    private function analyzeCollectionChain(MethodCall $methodCall, ReflectionClass $class): array
+    {
+        // If the chain ends with toArray(), it returns an array
+        if (is_string($methodCall->name->name ?? null) && $methodCall->name->name === 'toArray') {
+            return [
+                'type' => 'array',
+                'items' => ['type' => 'object'], // Laravel collections typically contain objects
+            ];
+        }
+
+        // For other collection methods, return array type
+        $methodName = $methodCall->name->name ?? null;
+        if (is_string($methodName) && in_array($methodName, ['get', 'map', 'filter', 'pluck'])) {
+            return [
+                'type' => 'array',
+                'items' => ['type' => 'object'],
+            ];
+        }
+
+        return ['type' => 'unknown'];
     }
 
     /**
@@ -302,12 +367,8 @@ class AstAnalyzer
     private function analyzeVariable(Variable $variable): array
     {
         if (is_string($variable->name)) {
-            return match ($variable->name) {
-                'stats' => ['type' => 'object', 'description' => 'Event statistics'],
-                'ticketTypes' => ['type' => 'array', 'description' => 'Ticket types with sales data'],
-                'recentActivity' => ['type' => 'array', 'description' => 'Recent event activity'],
-                default => ['type' => 'unknown']
-            };
+            // For now, return unknown to let the context analyzer handle variable tracing
+            return ['type' => 'unknown'];
         }
 
         return ['type' => 'unknown'];
@@ -422,7 +483,33 @@ class AstAnalyzer
             return $node->value;
         }
 
+        // Handle identifiers (unquoted array keys)
+        if ($node instanceof Node\Identifier) {
+            return $node->toString();
+        }
+
+        // Handle scalar integers as keys
+        if ($node instanceof Node\Scalar\LNumber) {
+            return (string) $node->value;
+        }
+
         return null;
+    }
+
+    /**
+     * Infer method return type based on method name and signature when AST analysis fails
+     */
+    private function inferMethodReturnType(ReflectionMethod $method): array
+    {
+        $methodName = strtolower($method->getName());
+
+        // Pattern 1: Methods that likely return arrays based on naming
+        if (str_ends_with($methodName, 's') && ! str_ends_with($methodName, 'ss')) {
+            return ['type' => 'array'];
+        }
+
+        // Pattern 2: Default fallback
+        return ['type' => 'unknown'];
     }
 
     /**
@@ -438,12 +525,12 @@ class AstAnalyzer
      */
     private function analyzeClassMethodInternal(ReflectionClass $class, string $methodName): array
     {
-        // Enhanced trait method detection for Laravel patterns
-        if ($methodName === 'getFormattedAddress') {
+        // Generic pattern-based trait method detection
+        if (str_contains(strtolower($methodName), 'address') && str_contains(strtolower($methodName), 'formatted')) {
             return ['type' => 'string', 'nullable' => true];
         }
 
-        if ($methodName === 'getManageEventData') {
+        if (str_contains(strtolower($methodName), 'data') && str_contains(strtolower($methodName), 'manage')) {
             return $this->typeAnalyzer->analyzeTraitMethod($methodName, $class);
         }
 
@@ -457,7 +544,11 @@ class AstAnalyzer
                 return $result;
             }
 
-            return $this->analyzeMethodReturnStructure($method);
+            // Try direct AST analysis of the method
+            $astResult = $this->analyzeMethodReturnStructure($method);
+            if ($astResult['type'] !== 'unknown') {
+                return $astResult;
+            }
         }
 
         // Check traits for the method
@@ -465,8 +556,8 @@ class AstAnalyzer
             if ($trait->hasMethod($methodName)) {
                 $method = $trait->getMethod($methodName);
 
-                // Enhanced trait method analysis
-                if ($methodName === 'getManageEventData') {
+                // Enhanced trait method analysis using generic patterns
+                if (str_contains(strtolower($methodName), 'data') && str_contains(strtolower($methodName), 'manage')) {
                     return $this->typeAnalyzer->analyzeTraitMethod($methodName, $class);
                 }
 
@@ -476,7 +567,11 @@ class AstAnalyzer
                     return $result;
                 }
 
-                return $this->analyzeMethodReturnStructure($method);
+                // Try direct AST analysis for trait methods
+                $astResult = $this->analyzeMethodReturnStructure($method);
+                if ($astResult['type'] !== 'unknown') {
+                    return $astResult;
+                }
             }
         }
 

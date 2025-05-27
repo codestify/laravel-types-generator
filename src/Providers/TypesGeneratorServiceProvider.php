@@ -3,9 +3,12 @@
 namespace Codemystify\TypesGenerator\Providers;
 
 use Codemystify\TypesGenerator\Console\GenerateTypesCommand;
+use Codemystify\TypesGenerator\Services\CommonTypesExtractor;
 use Codemystify\TypesGenerator\Services\MigrationAnalyzer;
 use Codemystify\TypesGenerator\Services\SimpleReflectionAnalyzer;
 use Codemystify\TypesGenerator\Services\TypeGeneratorService;
+use Codemystify\TypesGenerator\Services\TypeReferenceRewriter;
+use Codemystify\TypesGenerator\Services\TypeRegistry;
 use Codemystify\TypesGenerator\Services\TypeScriptGenerator;
 use Illuminate\Support\ServiceProvider;
 
@@ -18,6 +21,11 @@ class TypesGeneratorServiceProvider extends ServiceProvider
             'types-generator'
         );
 
+        // Register new deduplication services
+        $this->app->singleton(TypeRegistry::class);
+        $this->app->singleton(CommonTypesExtractor::class);
+        $this->app->singleton(TypeReferenceRewriter::class);
+
         $this->app->singleton(TypeGeneratorService::class, function ($app) {
             return new TypeGeneratorService(
                 $app->make(SimpleReflectionAnalyzer::class),
@@ -28,7 +36,14 @@ class TypesGeneratorServiceProvider extends ServiceProvider
 
         $this->app->singleton(SimpleReflectionAnalyzer::class);
         $this->app->singleton(MigrationAnalyzer::class);
-        $this->app->singleton(TypeScriptGenerator::class);
+
+        $this->app->singleton(TypeScriptGenerator::class, function ($app) {
+            return new TypeScriptGenerator(
+                $app->make(TypeRegistry::class),
+                $app->make(CommonTypesExtractor::class),
+                $app->make(TypeReferenceRewriter::class)
+            );
+        });
     }
 
     public function boot(): void

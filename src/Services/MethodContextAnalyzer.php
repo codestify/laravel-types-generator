@@ -104,8 +104,8 @@ class MethodContextAnalyzer
             return $this->analyzeMethodCallDynamic($expr, $class);
         }
 
-        // For other expression types, use basic inference
-        return ['type' => 'unknown'];
+        // For other expression types, delegate to AST analyzer
+        return $this->astAnalyzer->analyzeExpression($expr, $class);
     }
 
     /**
@@ -119,18 +119,17 @@ class MethodContextAnalyzer
 
             $methodName = $methodCall->name->name;
 
+            // Special handling for whenLoaded - delegate to main AST analyzer
+            if ($methodName === 'whenLoaded') {
+                return $this->astAnalyzer->analyzeExpression($methodCall, $class);
+            }
+
             // Look for the method in the current class (including protected methods)
             if ($class->hasMethod($methodName)) {
                 $targetMethod = $class->getMethod($methodName);
 
-                // For known patterns, use specific analysis
-                $result = $this->analyzeKnownMethod($methodName, $targetMethod, $class);
-                if ($result['type'] !== 'unknown') {
-                    return $result;
-                }
-
-                // Recursively analyze the target method
-                return $this->analyzeMethodWithContext($targetMethod, $class);
+                // Recursively analyze the target method using AST analyzer
+                return $this->astAnalyzer->analyzeMethodReturnStructure($targetMethod);
             }
 
             // Check traits
@@ -138,17 +137,18 @@ class MethodContextAnalyzer
                 if ($trait->hasMethod($methodName)) {
                     $targetMethod = $trait->getMethod($methodName);
 
-                    return $this->analyzeMethodWithContext($targetMethod, $class);
+                    return $this->astAnalyzer->analyzeMethodReturnStructure($targetMethod);
                 }
             }
         }
 
-        // Handle chained calls like $this->status->value
+        // Handle chained calls like $this->status->value - delegate to AST analyzer
         if ($methodCall->var instanceof PropertyFetch) {
-            return $this->analyzeChainedCall($methodCall, $class);
+            return $this->astAnalyzer->analyzeExpression($methodCall, $class);
         }
 
-        return ['type' => 'unknown'];
+        // For any other method calls, delegate to AST analyzer
+        return $this->astAnalyzer->analyzeExpression($methodCall, $class);
     }
 
     /**
@@ -156,20 +156,9 @@ class MethodContextAnalyzer
      */
     private function analyzeKnownMethod(string $methodName, ReflectionMethod $method, ReflectionClass $class): array
     {
-        // Pattern-based analysis for common Laravel resource methods
-        if (str_contains($methodName, 'Stats') || str_contains($methodName, 'calculateStats')) {
-            return $this->inferStatsMethod($method);
-        }
-
-        if (str_contains($methodName, 'TicketTypes') || str_contains($methodName, 'getTicketTypes')) {
-            return $this->inferTicketTypesMethod($method);
-        }
-
-        if (str_contains($methodName, 'Activity') || str_contains($methodName, 'getRecentActivity')) {
-            return $this->inferActivityMethod($method);
-        }
-
-        return ['type' => 'unknown'];
+        // Only use pattern-based analysis for truly generic cases
+        // For specific methods, always prefer actual analysis
+        return ['type' => 'unknown']; // Let the actual method analysis handle this
     }
 
     /**
@@ -282,48 +271,17 @@ class MethodContextAnalyzer
      */
     private function inferStatsMethod(ReflectionMethod $method): array
     {
-        // Look for common stats patterns in the method source
-        $source = $this->getMethodSource($method);
-
-        $structure = [];
-
-        if (strpos($source, 'soldTickets') !== false) {
-            $structure['soldTickets'] = ['type' => 'number'];
-        }
-        if (strpos($source, 'checkInsToday') !== false) {
-            $structure['checkInsToday'] = ['type' => 'number'];
-        }
-        if (strpos($source, 'conversionRate') !== false) {
-            $structure['conversionRate'] = ['type' => 'number'];
-        }
-        if (strpos($source, 'totalRevenue') !== false) {
-            $structure['totalRevenue'] = ['type' => 'number'];
-        }
-
-        return empty($structure) ? ['type' => 'unknown'] : [
-            'type' => 'object',
-            'structure' => $structure,
-        ];
+        // Return generic object type - let actual analysis handle the structure
+        return ['type' => 'object'];
     }
 
     /**
-     * Infer ticket types method return type
+     * Infer sales method return type
      */
-    private function inferTicketTypesMethod(ReflectionMethod $method): array
+    private function inferSalesMethod(ReflectionMethod $method): array
     {
-        return [
-            'type' => 'array',
-            'items' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'name' => ['type' => 'string'],
-                    'price' => ['type' => 'number'],
-                    'quantity' => ['type' => 'number'],
-                    'sold' => ['type' => 'number'],
-                ],
-            ],
-        ];
+        // Return generic array type - let actual analysis handle the structure
+        return ['type' => 'array'];
     }
 
     /**
@@ -331,24 +289,26 @@ class MethodContextAnalyzer
      */
     private function inferActivityMethod(ReflectionMethod $method): array
     {
-        return [
-            'type' => 'array',
-            'items' => [
-                'type' => 'object',
-                'structure' => [
-                    'id' => ['type' => 'number'],
-                    'description' => ['type' => 'string'],
-                    'created_at' => ['type' => 'string'],
-                    'user' => [
-                        'type' => 'object',
-                        'structure' => [
-                            'name' => ['type' => 'string'],
-                            'email' => ['type' => 'string'],
-                        ],
-                    ],
-                ],
-            ],
-        ];
+        // Return generic array type - let actual analysis handle the structure
+        return ['type' => 'array'];
+    }
+
+    /**
+     * Infer traffic method return type
+     */
+    private function inferTrafficMethod(ReflectionMethod $method): array
+    {
+        // Return generic array type - let actual analysis handle the structure
+        return ['type' => 'array'];
+    }
+
+    /**
+     * Infer demographics method return type
+     */
+    private function inferDemographicsMethod(ReflectionMethod $method): array
+    {
+        // Return generic array type - let actual analysis handle the structure
+        return ['type' => 'array'];
     }
 
     // Helper methods

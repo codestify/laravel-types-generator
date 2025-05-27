@@ -15,15 +15,38 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
     private array $generatedEnums = [];
 
-    public function __construct()
-    {
+    private ?TypeRegistry $typeRegistry = null;
+
+    private ?CommonTypesExtractor $commonTypesExtractor = null;
+
+    private ?TypeReferenceRewriter $typeReferenceRewriter = null;
+
+    public function __construct(
+        ?TypeRegistry $typeRegistry = null,
+        ?CommonTypesExtractor $commonTypesExtractor = null,
+        ?TypeReferenceRewriter $typeReferenceRewriter = null
+    ) {
         $this->config = config('types-generator');
+        $this->typeRegistry = $typeRegistry;
+        $this->commonTypesExtractor = $commonTypesExtractor;
+        $this->typeReferenceRewriter = $typeReferenceRewriter;
     }
 
     public function generateFiles(array $types): array
     {
         $this->validateConfig();
         $this->ensureOutputDirectory();
+
+        // NEW: Type deduplication flow
+        if ($this->config['commons']['enabled'] ?? false) {
+            $registry = $this->buildTypeRegistry($types);
+            $commonTypes = $this->extractCommonTypes($registry);
+
+            if (! empty($commonTypes)) {
+                $types = $this->rewriteReferences($types, $commonTypes);
+                $this->generateCommonsFile($commonTypes);
+            }
+        }
 
         $results = [];
         $groupedTypes = $this->groupTypesByGroup($types);
@@ -96,7 +119,7 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
         $outputPath = PathResolver::resolve($this->config['output']['path']);
         $filepath = $outputPath.'/'.$filename;
 
-        $content = $this->generateTypeScriptContent($types);
+        $content = $this->generateTypeScriptContent($types, $group);
 
         $this->backupIfExists($filepath);
         File::put($filepath, $content);
@@ -110,9 +133,18 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
         ];
     }
 
-    private function generateTypeScriptContent(array $types): string
+    private function generateTypeScriptContent(array $types, string $group = 'default'): string
     {
         $content = $this->generateHeader();
+
+        // Generate import statements for common types if needed
+        if (($this->config['commons']['enabled'] ?? false) && $this->typeReferenceRewriter) {
+            $commonTypes = []; // This would be populated from the registry during generation
+            $imports = $this->typeReferenceRewriter->generateImportStatements($commonTypes, $group);
+            if (! empty($imports)) {
+                $content .= $imports."\n\n";
+            }
+        }
 
         foreach ($types as $typeName => $typeData) {
             $content .= $this->generateTypeDefinition($typeName, $typeData);
@@ -187,24 +219,31 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
         // Handle type references first
         if (isset($value['reference'])) {
-            return $value['reference'];
+            $baseType = $value['reference'];
+        } else {
+            $baseType = match ($type) {
+                'string' => $this->handleStringType($value),
+                'number' => 'number',
+                'boolean' => 'boolean',
+                'array' => $this->handleArrayType($value),
+                'object' => $this->handleObjectType($value),
+                'enum' => $this->handleEnumType($value),
+                'json' => 'Record<string, any>',
+                'date' => 'string',
+                'datetime' => 'string',
+                'timestamps' => 'string',
+                'null' => 'null',
+                'reference' => $value['reference'] ?? 'unknown',
+                default => 'unknown'
+            };
         }
 
-        return match ($type) {
-            'string' => $this->handleStringType($value),
-            'number' => 'number',
-            'boolean' => 'boolean',
-            'array' => $this->handleArrayType($value),
-            'object' => $this->handleObjectType($value),
-            'enum' => $this->handleEnumType($value),
-            'json' => 'Record<string, any>',
-            'date' => 'string',
-            'datetime' => 'string',
-            'timestamps' => 'string',
-            'null' => 'null',
-            'reference' => $value['reference'] ?? 'unknown',
-            default => 'unknown'
-        };
+        // Handle nullable types by adding | null to the base type
+        if (($value['nullable'] ?? false) && $baseType !== 'null') {
+            return $baseType.' | null';
+        }
+
+        return $baseType;
     }
 
     private function handleStringType(array $value): string
@@ -272,9 +311,13 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
     private function isOptional(array $value): bool
     {
-        return ($value['nullable'] ?? false) ||
-            isset($value['default']) ||
-            ! $this->config['generation']['strict_types'];
+        // Field is optional only if:
+        // 1. It has a default value (might not be present in API response)
+        // 2. Strict types are disabled (everything becomes optional)
+        // 3. It's explicitly marked as optional (for conditional fields)
+        return isset($value['default']) ||
+            ! $this->config['generation']['strict_types'] ||
+            ($value['optional'] ?? false);
     }
 
     private function groupTypesByGroup(array $types): array
@@ -296,6 +339,13 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
 
         $content = $this->generateHeader();
         $content .= "// Re-export all generated types\n\n";
+
+        // Include commons file if enabled
+        if (($this->config['commons']['enabled'] ?? false) &&
+            ($this->config['commons']['include_in_index'] ?? true)) {
+            $commonsFileName = $this->config['commons']['file_name'] ?? 'common';
+            $content .= "export * from './{$commonsFileName}';\n";
+        }
 
         foreach (array_keys($groupedTypes) as $group) {
             $filename = str_replace(['{group}', '.ts'], [$group, ''], $this->config['output']['filename_pattern']);
@@ -356,11 +406,21 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
                     'source' => 'extracted_nested_type',
                 ];
 
-                // Replace the inline structure with a reference
+                // Replace the inline structure with a reference, preserving nullable flag
+                $nullable = $field['nullable'] ?? false;
+                $optional = $field['optional'] ?? false;
                 $field = [
                     'type' => 'reference',
                     'reference' => $nestedTypeName,
                 ];
+
+                // Preserve nullable and optional flags
+                if ($nullable) {
+                    $field['nullable'] = true;
+                }
+                if ($optional) {
+                    $field['optional'] = true;
+                }
 
                 // Recursively check for deeper nesting
                 $this->extractNestedTypesFromStructure($types[$nestedTypeName]['structure'], $nestedTypeName, $types);
@@ -406,5 +466,112 @@ class TypeScriptGenerator implements TypeScriptGeneratorInterface
     private function camelCase(string $string): string
     {
         return str_replace('_', '', ucwords($string, '_'));
+    }
+
+    /**
+     * Build type registry for deduplication
+     */
+    private function buildTypeRegistry(array $types): TypeRegistry
+    {
+        if (! $this->typeRegistry) {
+            $this->typeRegistry = new TypeRegistry;
+        }
+
+        $this->typeRegistry->clear();
+
+        foreach ($types as $typeName => $typeData) {
+            $group = $typeData['group'] ?? 'default';
+            $source = $typeData['source'] ?? 'unknown';
+            $structure = $typeData['structure'] ?? [];
+
+            $this->typeRegistry->registerType($typeName, $structure, $group, $source);
+        }
+
+        return $this->typeRegistry;
+    }
+
+    /**
+     * Extract common types using CommonTypesExtractor
+     */
+    private function extractCommonTypes(TypeRegistry $registry): array
+    {
+        if (! $this->commonTypesExtractor) {
+            $this->commonTypesExtractor = new CommonTypesExtractor($this->config['commons'] ?? []);
+        }
+
+        return $this->commonTypesExtractor->extractCommonTypes($registry);
+    }
+
+    /**
+     * Rewrite type references using TypeReferenceRewriter
+     */
+    private function rewriteReferences(array $types, array $commonTypes): array
+    {
+        if (! $this->typeReferenceRewriter) {
+            $this->typeReferenceRewriter = new TypeReferenceRewriter($this->config['commons'] ?? []);
+        }
+
+        $groupedTypes = $this->groupTypesByGroup($types);
+        $rewrittenGroups = $this->typeReferenceRewriter->rewriteReferences($groupedTypes, $commonTypes);
+
+        // Flatten back to original format but maintain the filtering
+        $rewrittenTypes = [];
+        foreach ($rewrittenGroups as $group => $groupTypes) {
+            foreach ($groupTypes as $typeName => $typeData) {
+                // Make sure to preserve all the original type data
+                if (isset($types[$typeName])) {
+                    $rewrittenTypes[$typeName] = array_merge($types[$typeName], $typeData);
+                } else {
+                    $rewrittenTypes[$typeName] = $typeData;
+                }
+            }
+        }
+
+        return $rewrittenTypes;
+    }
+
+    /**
+     * Generate commons file with shared types
+     */
+    private function generateCommonsFile(array $commonTypes): array
+    {
+        $commonsConfig = $this->config['commons'] ?? [];
+        $filename = ($commonsConfig['file_name'] ?? 'common').'.ts';
+        $outputPath = PathResolver::resolve($this->config['output']['path']);
+        $filepath = $outputPath.'/'.$filename;
+
+        $content = $this->generateHeader();
+        $content .= "// Common types used across multiple domains\n\n";
+
+        foreach ($commonTypes as $fingerprint => $commonType) {
+            $typeName = $commonType['name'];
+            $structure = $commonType['structure'];
+
+            // Generate the type definition
+            $typeData = [
+                'config' => (object) [
+                    'name' => $typeName,
+                    'description' => 'Shared type used across multiple domains',
+                ],
+                'structure' => $structure,
+                'source' => 'common_extracted',
+            ];
+
+            $content .= $this->generateTypeDefinition($typeName, $typeData);
+            $content .= "\n\n";
+        }
+
+        $content .= $this->generateFooter();
+
+        $this->backupIfExists($filepath);
+        File::put($filepath, $content);
+
+        return [
+            'name' => 'common',
+            'file' => $filename,
+            'types_count' => count($commonTypes),
+            'status' => true,
+            'source' => 'commons_extracted',
+        ];
     }
 }

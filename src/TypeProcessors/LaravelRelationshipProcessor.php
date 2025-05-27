@@ -39,19 +39,20 @@ class LaravelRelationshipProcessor implements TypeProcessor
     }
 
     /**
-     * Check if property name suggests a relationship
+     * Check if property name suggests a relationship using generic Laravel patterns only
      */
     private function isRelationshipProperty(string $property): bool
     {
-        $relationshipPatterns = [
-            'category', 'eventCategory', 'event_category',
-            'organization', 'user', 'owner', 'author',
-            'parent', 'company', 'team', 'group',
-        ];
-
-        return in_array($property, $relationshipPatterns) ||
-               str_ends_with($property, 'Category') ||
-               str_ends_with($property, 'Organization');
+        // Use ONLY generic Laravel naming patterns - NO domain-specific field names
+        return
+            // Generic patterns that work across any domain
+            str_ends_with($property, '_id') ||                    // Foreign key pattern
+            str_ends_with($property, 's') && ! str_ends_with($property, 'ss') || // Plural suggests hasMany
+            str_contains($property, '_') && ! str_starts_with($property, 'is_') && ! str_starts_with($property, 'has_') || // Compound names
+            // Common generic relationship suffixes
+            str_ends_with($property, 'Items') ||
+            str_ends_with($property, 'List') ||
+            str_ends_with($property, 'Data');
     }
 
     /**
@@ -92,46 +93,27 @@ class LaravelRelationshipProcessor implements TypeProcessor
     /**
      * Infer relationship structure from naming patterns
      */
+    /**
+     * Infer relationship structure using ONLY generic Laravel patterns - NO hardcoded field names
+     */
     private function inferFromNamingPattern(string $property): array
     {
-        return match ($property) {
-            'category', 'eventCategory', 'event_category' => [
-                'type' => 'object',
-                'nullable' => true,
-                'structure' => [
-                    'id' => ['type' => 'string', 'description' => 'Category ULID'],
-                    'name' => ['type' => 'string'],
-                    'slug' => ['type' => 'string'],
-                    'description' => ['type' => 'string', 'nullable' => true],
-                    'color' => ['type' => 'string', 'nullable' => true],
-                ],
-                'description' => 'Event category relationship',
-            ],
-            'organization' => [
-                'type' => 'object',
-                'nullable' => true,
-                'structure' => [
-                    'id' => ['type' => 'string', 'description' => 'Organization ULID'],
-                    'name' => ['type' => 'string'],
-                    'slug' => ['type' => 'string'],
-                    'logo' => ['type' => 'string', 'nullable' => true],
-                    'website' => ['type' => 'string', 'nullable' => true],
-                ],
-                'description' => 'Organization relationship',
-            ],
-            'user', 'owner', 'author' => [
-                'type' => 'object',
-                'nullable' => true,
-                'structure' => [
-                    'id' => ['type' => 'string', 'description' => 'User ULID'],
-                    'name' => ['type' => 'string'],
-                    'email' => ['type' => 'string'],
-                    'avatar' => ['type' => 'string', 'nullable' => true],
-                ],
-                'description' => 'User relationship',
-            ],
-            default => ['type' => 'object', 'nullable' => true]
-        };
+        // Generic relationship structure that works for ANY domain
+        // All relationships have an ID at minimum
+        $baseStructure = [
+            'id' => ['type' => 'string'], // Support ULIDs/UUIDs
+        ];
+
+        // Most entities have a name field (but not all, so make it conditional)
+        if (! in_array($property, ['permission', 'role', 'setting', 'config'])) {
+            $baseStructure['name'] = ['type' => 'string'];
+        }
+
+        return [
+            'type' => 'object',
+            'nullable' => true, // Relationships are typically nullable
+            'structure' => $baseStructure,
+        ];
     }
 
     /**

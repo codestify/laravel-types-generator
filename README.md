@@ -4,6 +4,8 @@
 
 **🚀 Generate TypeScript types directly from your Laravel Resources and Controllers**
 
+*Domain-agnostic • Pattern-based • Zero configuration required*
+
 [![Latest Version](https://img.shields.io/packagist/v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
 [![PHP Version](https://img.shields.io/packagist/php-v/codemystify/laravel-types-generator)](https://packagist.org/packages/codemystify/laravel-types-generator)
 [![Laravel Version](https://img.shields.io/badge/Laravel-11%2B%20%7C%2012%2B-red.svg)](https://laravel.com)
@@ -15,13 +17,15 @@
 
 ## 💡 Why This Package?
 
-Automatically generate TypeScript types from your Laravel API responses. No more manual type definitions, no more sync issues.
+Automatically generate TypeScript types from your Laravel API responses. **Works with any Laravel project** - e-commerce, CRM, blog, SaaS, or custom applications.
 
 **Key Benefits:**
 - 🔄 **Always in sync** - Types generated from actual code
 - 🚀 **Zero maintenance** - No manual type definitions
 - 🛡️ **Type safety** - Catch errors at compile time
 - ⚡ **Developer experience** - Full IntelliSense and autocomplete
+- 🎯 **Domain-agnostic** - Works with any Laravel project out of the box
+- 🧠 **Smart pattern detection** - Understands Laravel conventions automatically
 
 ---
 
@@ -49,18 +53,23 @@ mkdir -p resources/js/types/generated
 use Codemystify\TypesGenerator\Attributes\GenerateTypes;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-class EventResource extends JsonResource
+class UserResource extends JsonResource
 {
-    #[GenerateTypes(name: 'Event', group: 'events')]
+    #[GenerateTypes(name: 'User', group: 'users')]
     public function toArray($request): array
     {
         return [
             'id' => $this->id,
-            'title' => $this->title,
-            'description' => $this->description,
-            'start_date' => $this->start_date,
-            'is_featured' => $this->is_featured,
-            'organization' => $this->organization,
+            'name' => $this->name,
+            'email' => $this->email,
+            'created_at' => $this->created_at->toISOString(),
+            'is_active' => $this->is_active,
+            'profile' => $this->whenLoaded('profile', function () {
+                return [
+                    'bio' => $this->profile->bio,
+                    'avatar' => $this->profile->avatar_url,
+                ];
+            }),
         ];
     }
 }
@@ -75,14 +84,20 @@ php artisan generate:types
 ### 3. Use in Frontend
 
 ```typescript
-import type { Event } from '@/types/generated';
+import type { User } from '@/types/generated';
 
-const EventCard: React.FC<{ event: Event }> = ({ event }) => {
+const UserCard: React.FC<{ user: User }> = ({ user }) => {
     return (
         <div>
-            <h2>{event.title}</h2>
-            <p>{event.description}</p>
-            {event.is_featured && <span>Featured</span>}
+            <h2>{user.name}</h2>
+            <p>{user.email}</p>
+            {user.is_active && <span>Active</span>}
+            {user.profile && (
+                <div>
+                    <p>{user.profile.bio}</p>
+                    <img src={user.profile.avatar} alt="Avatar" />
+                </div>
+            )}
         </div>
     );
 };
@@ -102,8 +117,8 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
 │   App/Http/      │    │   App/Http/      │    │   App/Models/    │
 │   Resources/     │◄──►│   Controllers/   │◄──►│   (Schema Info)  │
 │                  │    │                  │    │                  │
-│ ├─ EventResource │    │ ├─ EventController│    │ ├─ Event.php    │
 │ ├─ UserResource  │    │ ├─ UserController │    │ ├─ User.php     │
+│ ├─ PostResource  │    │ ├─ PostController │    │ ├─ Post.php     │
 │ └─ ...           │    │ └─ ...           │    │ └─ ...          │
 └──────────────────┘    └──────────────────┘    └──────────────────┘
            │                        │                        │
@@ -133,8 +148,8 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
 │                                                                 │
 │  ┌─────────────────┐           ┌─────────────────┐              │
 │  │ Group Types     │    ──►    │ Generate Files  │              │
-│  │ • events.ts     │           │ • TypeScript    │              │
-│  │ • users.ts      │           │   interfaces    │              │
+│  │ • users.ts      │           │ • TypeScript    │              │
+│  │ • posts.ts      │           │   interfaces    │              │
 │  │ • default.ts    │           │ • Comments      │              │
 │  └─────────────────┘           │ • Exports       │              │
 │                                └─────────────────┘              │
@@ -145,10 +160,10 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
 ┌─────────────────────────────────────────────────────────────────┐
 │            resources/js/types/generated/                       │
 │                                                                 │
-│  ├─ events.ts     ──► export interface Event { ... }           │
 │  ├─ users.ts      ──► export interface User { ... }            │
+│  ├─ posts.ts      ──► export interface Post { ... }            │
 │  ├─ default.ts    ──► export interface Other { ... }           │
-│  └─ index.ts      ──► export * from './events'; ...            │
+│  └─ index.ts      ──► export * from './users'; ...             │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -162,14 +177,84 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
 
 ## ✨ Features
 
-- **Attribute-based**: Use `#[GenerateTypes]` to mark methods for type generation
-- **Smart Analysis**: Combines AST parsing, reflection, and database schema analysis
-- **Type Groups**: Organize types into separate files (`events.ts`, `users.ts`, etc.)
+### Core Capabilities
+- **Domain-Agnostic**: Works with any Laravel project (e-commerce, CRM, blog, etc.)
+- **Attribute-Based**: Use `#[GenerateTypes]` to mark methods for type generation
+- **Smart Pattern Detection**: Automatically recognizes Laravel conventions without configuration
+
+### Analysis Engine
+- **AST Parsing**: Deep code analysis for complex expressions and closures
+- **Database Schema**: Integrates with migrations for accurate property types
+- **Relationship Detection**: Automatically handles `whenLoaded()` and Laravel relationships
+- **Method Tracing**: Follows method calls and trait usage for complete type inference
+
+### Output & Organization
+- **Nested Types**: Automatically extracts and names nested object structures
+- **TypeScript Standards**: Generates clean, readable interfaces with proper documentation
+- **Index Exports**: Creates convenient barrel exports for easy importing
+
+### Developer Experience
 - **Environment Support**: Configure paths via environment variables
 - **Caching**: Built-in caching for faster subsequent generations
-- **Laravel Patterns**: Understands Laravel conventions and relationships
-- **Nested Types**: Automatically extracts nested object structures
 - **Error Handling**: Graceful fallbacks for complex scenarios
+- **Laravel Patterns**: Understands common patterns like enums, dates, and nullable fields
+
+---
+
+## 🎯 Smart Pattern Detection
+
+The package automatically recognizes common Laravel patterns without any configuration:
+
+### Property Patterns
+```php
+// Automatically detected as string
+'id', 'uuid', 'ulid', 'title', 'name', 'description', 'slug', 'email'
+
+// Automatically detected as boolean  
+'is_active', 'is_featured', 'has_permission', 'can_edit'
+
+// Automatically detected as number
+'price', 'amount', 'total', 'count', 'quantity'
+
+// Automatically detected as date strings
+'created_at', 'updated_at', 'published_at', 'start_date'
+```
+
+### Relationship Patterns
+```php
+// Category relationships (any field containing 'category')
+'category', 'event_category', 'post_category'
+// → { id: string; name: string; slug: string; }
+
+// Image/Media relationships (any field containing 'image') 
+'cover_image', 'avatar', 'banner', 'profile_image'
+// → { url: string; alt_text?: string; }
+
+// User relationships (any field containing 'user')
+'user', 'created_by', 'assigned_user'
+// → { id: string; name: string; email: string; }
+```
+
+### Method Patterns
+```php
+// Address/location methods
+getFormattedAddress(), getFullAddress()
+// → string | null
+
+// Management data methods  
+getManageUserData(), getManagementData(), getDataForManagement()
+// → Generic object structure
+
+// Analytics methods
+getStats(), calculateAnalytics(), getMetrics()
+// → { total: number; count: number; percentage: number; }
+```
+
+### Laravel Conventions
+- **Enums**: Automatically detects `->value` access and ternary enum patterns
+- **Dates**: Recognizes `->toISOString()`, `->format()` method calls
+- **whenLoaded()**: Properly analyzes closure returns for relationship data
+- **Nullable**: Smart detection of nullable fields based on context
 
 ---
 
@@ -180,7 +265,7 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
 php artisan generate:types
 
 # Generate specific group only
-php artisan generate:types --group=events
+php artisan generate:types --group=users
 
 # Force regeneration (ignores cache)
 php artisan generate:types --force
@@ -226,22 +311,27 @@ The `config/types-generator.php` file controls all package behavior:
  */
 
 /**
- * Event resource data structure
- * @source App\Http\Resources\EventResource::toArray
- * @group events
+ * User resource data structure
+ * @source App\Http\Resources\UserResource::toArray
+ * @group users
  */
-export interface Event {
-  readonly id: string;
-  readonly title: string;
-  readonly description?: string;
-  readonly start_date: string;
-  readonly is_featured?: boolean;
-  readonly organization?: OrganizationType;
-}
-
-export interface OrganizationType {
+export interface User {
   readonly id: string;
   readonly name: string;
+  readonly email: string;
+  readonly created_at: string;
+  readonly is_active: boolean;
+  readonly profile: ProfileType | null;
+}
+
+/**
+ * Profile data structure
+ * @source extracted_nested_type
+ * @group users
+ */
+export interface ProfileType {
+  readonly bio: string;
+  readonly avatar: string;
 }
 ```
 
