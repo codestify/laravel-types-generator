@@ -52,14 +52,10 @@ class CleanupTypesCommand extends Command
     private function removeAttributes(bool $dryRun): int
     {
         $count = 0;
-        $sourcePaths = config('types-generator.sources', [
-            'app/Http/Resources',
-            'app/Http/Controllers',
-            'app/Models',
-        ]);
+        $sourcePaths = config('types-generator.sources', []);
 
         foreach ($sourcePaths as $relativePath) {
-            $path = app_path(str_replace('app/', '', $relativePath));
+            $path = $this->resolvePath($relativePath);
             if (! is_dir($path)) {
                 continue;
             }
@@ -143,5 +139,26 @@ class CleanupTypesCommand extends Command
         if ($results['files_kept'] > 0) {
             $this->line("  Kept {$results['files_kept']} non-TypeScript files");
         }
+    }
+
+    private function resolvePath(string $relativePath): string
+    {
+        // If it's already an absolute path, return as-is
+        if (str_starts_with($relativePath, '/') || (PHP_OS_FAMILY === 'Windows' && preg_match('/^[A-Z]:\\\\/', $relativePath))) {
+            return $relativePath;
+        }
+
+        // Try Laravel's app_path first if available
+        if (function_exists('app_path')) {
+            return app_path(str_replace('app/', '', $relativePath));
+        }
+
+        // Fallback to base path resolution
+        if (function_exists('base_path')) {
+            return base_path($relativePath);
+        }
+
+        // Final fallback - assume current working directory
+        return getcwd().'/'.$relativePath;
     }
 }

@@ -37,6 +37,74 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | File Type Detection & Categorization
+    |--------------------------------------------------------------------------
+    |
+    | Configure how the package detects file types and categorizes them.
+    | This is framework-agnostic and can be customized for any project structure.
+    |
+    */
+
+    'file_types' => [
+        // Map of directory names to type categories
+        'directory_mapping' => [
+            'resources' => 'resource',
+            'controllers' => 'controller',
+            'models' => 'model',
+            'entities' => 'entity',
+            'requests' => 'request',
+            'responses' => 'response',
+            'jobs' => 'job',
+            'events' => 'event',
+            'listeners' => 'listener',
+            'notifications' => 'notification',
+            'mail' => 'mail',
+            'services' => 'service',
+            'repositories' => 'repository',
+            'dtos' => 'dto',
+            'valueobjects' => 'value_object',
+            'commands' => 'command',
+            'queries' => 'query',
+        ],
+
+        // Available type categories for classification
+        'type_categories' => [
+            'resource',
+            'controller',
+            'model',
+            'entity',
+            'request',
+            'response',
+            'job',
+            'event',
+            'listener',
+            'notification',
+            'mail',
+            'service',
+            'repository',
+            'dto',
+            'value_object',
+            'command',
+            'query',
+            'unknown',
+        ],
+
+        // Categories for organizing in index files
+        'index_categories' => [
+            'Entities' => ['model', 'entity'],
+            'Resources' => ['resource', 'dto'],
+            'Controllers' => ['controller'],
+            'Services' => ['service', 'repository'],
+            'Requests' => ['request', 'response'],
+            'Events' => ['event', 'listener'],
+            'Jobs' => ['job', 'command', 'query'],
+            'Notifications' => ['notification', 'mail'],
+            'Other' => ['unknown'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Intelligent Type Aggregation
     |--------------------------------------------------------------------------
     |

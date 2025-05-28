@@ -630,56 +630,110 @@ class IntelligentTypeAggregator
             $lines[] = '';
         }
 
-        // Group other exports by category
+        // Group other exports by category or just export all files
         $categorizedFiles = $this->categorizeTypeFiles($typeFiles, $commonFile);
 
-        foreach ($categorizedFiles as $category => $files) {
-            if (! empty($files)) {
-                $lines[] = "// {$category}";
-                foreach ($files as $file) {
-                    // Use the actual sanitized filename from the path if available, otherwise use name
-                    $actualFileName = isset($file['path']) 
-                        ? basename($file['path'], '.ts')
-                        : ($file['name'] ?? 'unknown');
-                    $lines[] = "export * from './{$actualFileName}';";
+        // If no categorization or all files are "Other", just export all files simply
+        $hasMultipleCategories = count(array_filter($categorizedFiles, fn ($files) => ! empty($files))) > 1;
+
+        if (! $hasMultipleCategories) {
+            // Simple export of all types without categorization
+            $lines[] = '// All generated types';
+            foreach ($typeFiles as $file) {
+                $fileName = $this->extractFileNameFromResult($file);
+                if ($fileName && $fileName !== $commonFile) {
+                    $lines[] = "export * from './{$fileName}';";
                 }
-                $lines[] = '';
+            }
+        } else {
+            // Categorized export
+            foreach ($categorizedFiles as $category => $files) {
+                if (! empty($files)) {
+                    $lines[] = "// {$category}";
+                    foreach ($files as $file) {
+                        $fileName = $this->extractFileNameFromResult($file);
+                        if ($fileName && $fileName !== $commonFile) {
+                            $lines[] = "export * from './{$fileName}';";
+                        }
+                    }
+                    $lines[] = '';
+                }
             }
         }
 
         return implode("\n", $lines);
     }
 
+    private function extractFileNameFromResult(array $file): ?string
+    {
+        // Try to extract filename from path first
+        if (isset($file['path']) && ! empty($file['path'])) {
+            return basename($file['path'], '.ts');
+        }
+
+        // Try to use the name directly and sanitize it
+        if (isset($file['name']) && ! empty($file['name'])) {
+            return $this->sanitizeFileName($file['name']);
+        }
+
+        return null;
+    }
+
+    private function sanitizeFileName(string $name): string
+    {
+        $namingPattern = config('types-generator.files.naming_pattern', 'kebab-case');
+
+        // Remove any invalid file name characters
+        $sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '', $name);
+
+        return match ($namingPattern) {
+            'kebab-case' => strtolower(preg_replace('/([a-z])([A-Z])/', '$1-$2', $sanitized)),
+            'snake_case' => strtolower(preg_replace('/([a-z])([A-Z])/', '$1_$2', $sanitized)),
+            'camelCase' => lcfirst($sanitized),
+            'PascalCase' => ucfirst($sanitized),
+            default => strtolower(preg_replace('/([a-z])([A-Z])/', '$1-$2', $sanitized)),
+        };
+    }
+
     private function categorizeTypeFiles(array $typeFiles, string $commonFile): array
     {
-        $categories = [
-            'Entities' => [],
-            'Resources' => [],
-            'Controllers' => [],
-            'Services' => [],
-            'Other' => [],
-        ];
+        // Get configurable categories from config
+        $indexCategories = config('types-generator.file_types.index_categories', [
+            'Other' => ['unknown'],
+        ]);
+
+        // Initialize categories array
+        $categories = [];
+        foreach (array_keys($indexCategories) as $categoryName) {
+            $categories[$categoryName] = [];
+        }
 
         foreach ($typeFiles as $file) {
             // Use the actual filename from the path if available, otherwise use name
-            $actualFileName = isset($file['path']) 
+            $actualFileName = isset($file['path'])
                 ? basename($file['path'], '.ts')
                 : ($file['name'] ?? 'unknown');
-                
+
             if ($actualFileName === $commonFile) {
                 continue;
             }
 
-            $fileType = $file['file_type'] ?? 'other';
-            $category = match ($fileType) {
-                'model' => 'Entities',
-                'resource' => 'Resources',
-                'controller' => 'Controllers',
-                'service', 'repository' => 'Services',
-                default => 'Other'
-            };
+            $fileType = $file['file_type'] ?? 'unknown';
 
-            $categories[$category][] = $file;
+            // Find which category this file type belongs to
+            $categoryFound = false;
+            foreach ($indexCategories as $categoryName => $fileTypes) {
+                if (in_array($fileType, $fileTypes)) {
+                    $categories[$categoryName][] = $file;
+                    $categoryFound = true;
+                    break;
+                }
+            }
+
+            // If no category found, put in "Other" category
+            if (! $categoryFound && isset($categories['Other'])) {
+                $categories['Other'][] = $file;
+            }
         }
 
         return array_filter($categories); // Remove empty categories
